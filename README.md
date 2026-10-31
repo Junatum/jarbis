@@ -1,0 +1,61 @@
+# Jarbis
+
+**Jarbis — Just A Rather Very Beautiful Intelligent System**
+
+SmartSafeHub의 경량 로컬 홈 자동화 엔진입니다. *Iron Man*의 J.A.R.V.I.S.를 패러디한 이름으로, Marvel 공식 제품과 관련이 없습니다. 영문 풀이는 사용자 프로젝트의 원래 표현을 그대로 유지합니다.
+
+- **버전:** 0.1.0-r1 (첫 프로젝트 스캐폴드)
+- **라이선스:** GPL-3.0-or-later
+- **대상:** OpenWrt 25.12 / SmartSafeHub (기본 기능에 대한 하드웨어별 실기 검증 필요)
+- **런타임:** BusyBox ash, UCI, rpcd-ucode, mosquitto_pub. Python/Node.js/AI 런타임 및 상주 데몬 불필요.
+
+## 현재 구현
+
+- 독립 `jarbis` OpenWrt 패키지, UCI 설정, 인증된 ubus API, 세분화된 ACL
+- 등록한 Tasmota 전구의 전원(`POWER`)과 밝기(`Dimmer`) MQTT 명령 송신
+- 전용 MQTT 클라이언트 설정 파일을 이용한 인증 정보 분리 (명령행에 비밀번호 노출하지 않음)
+- 패키지 설치 시 기능 **기본 비활성화**, 브로커 자동 생성/외부 포트 개방 없음
+- POSIX 셸 계약 테스트, Python 정적 계약 검사, CI
+
+**미구현:** 자동 탐색, 상태 수신/동기화, 예약·조건식 자동화, 장면(Scene), AI, SmartSafeHub 프론트엔드 UI. 현재 `light_set`의 `accepted: true`는 **브로커 게시 성공**만 의미하며, 실제 전구 동작 확인은 아닙니다.
+
+## OpenWrt 패키지 빌드
+
+이 저장소를 OpenWrt 빌드 트리의 `package/jarbis` 또는 자체 피드에 넣습니다.
+
+```sh
+make menuconfig                 # Utilities > jarbis 선택
+make package/jarbis/compile V=s
+```
+
+`jarbis`는 MQTT *클라이언트*만 설치합니다. 기존 보안 설정된 MQTT 브로커를 사용하거나, 별도로 Mosquitto 브로커를 설치·설정해야 합니다.
+
+## 최소 설정
+
+1. 신뢰할 수 있는 MQTT 브로커를 준비합니다. 전구는 같은 브로커로 연결하고 Tasmota의 MQTT Topic을 확인합니다.
+2. `/etc/config/jarbis`에서 `jarbis.broker.host`, `jarbis.broker.port`를 설정하고 `config device`를 등록합니다.
+3. 브로커에 인증이 필요하면 `/etc/jarbis/mosquitto_pub`에 `-u USERNAME`, `-P PASSWORD`를 각 줄에 지정합니다. 루트만 읽을 수 있도록 `chmod 600 /etc/jarbis/mosquitto_pub`을 적용합니다. 예: `mkdir -p /etc/jarbis && chmod 700 /etc/jarbis`.
+4. `uci set jarbis.main.enabled=1 && uci commit jarbis`로 활성화합니다.
+5. 관리자 로그인 상태의 ubus RPC로 기기 목록을 조회하고 명령을 전송합니다.
+
+```sh
+# 예: /etc/config/jarbis에 'living_room' 장치 등록 후
+ubus call jarbis status '{}'
+ubus call jarbis devices_list '{}'
+ubus call jarbis light_set '{"id":"living_room","capability":"power","value":"ON"}'
+ubus call jarbis light_set '{"id":"living_room","capability":"brightness","value":"50"}'
+```
+
+자세한 범위와 API 계약은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/INTEGRATION.md](docs/INTEGRATION.md), [docs/SECURITY.md](docs/SECURITY.md)를 참조하세요.
+
+## 테스트
+
+```sh
+sh tests/run.sh
+```
+
+로컬에 `ucode`가 없으면 셸·JSON·정적 계약 테스트만 실행합니다. CI에서는 `JARBIS_REQUIRE_UCODE=1`로 실제 ucode 컴파일을 필수로 검사합니다.
+
+## 개발 원칙
+
+Jarbis의 기기 타입/Capability → 상태 이벤트 → 규칙 엔진 → Action Executor는 내부 계약으로 분리합니다. 향후 `jarbis-ai` 모듈도 동일한 검증된 Action Executor를 사용해야 합니다. SafeShield 및 SmartSafeHub의 핵심 네트워크/로그인 RPC에는 Jarbis 코드를 추가하지 않습니다.

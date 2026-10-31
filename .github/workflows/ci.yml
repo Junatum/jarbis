@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: OpenWrt contracts and syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install pinned ucode compiler
+        env:
+          UCODE_REF: 8592205
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake libjson-c-dev pkg-config
+          git clone https://github.com/jow-/ucode.git "$RUNNER_TEMP/ucode"
+          git -C "$RUNNER_TEMP/ucode" checkout --detach "$UCODE_REF"
+          cmake -S "$RUNNER_TEMP/ucode" -B "$RUNNER_TEMP/ucode-build" -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=OFF -DULOOP_SUPPORT=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/ucode-build" --parallel
+          echo "$RUNNER_TEMP/ucode-build" >> "$GITHUB_PATH"
+      - name: Run tests (ucode required)
+        env:
+          JARBIS_REQUIRE_UCODE: '1'
+        run: sh tests/run.sh

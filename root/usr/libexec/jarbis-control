@@ -1,0 +1,76 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# One-shot command adapter. Do not use eval, shell command substitution of user data,
+# MQTT wildcard topics or credentials in command-line arguments.
+set -eu
+umask 077
+
+UCI_BIN="${JARBIS_UCI_BIN:-uci}"
+MQTT_PUB_BIN="${JARBIS_MQTT_PUB_BIN:-mosquitto_pub}"
+MQTT_CONFIG_DIR="${JARBIS_MQTT_CONFIG_DIR:-/etc/jarbis}"
+
+fail() { printf 'jarbis: %s\n' "$1" >&2; exit 1; }
+get_config() { "$UCI_BIN" -q get "$1" 2>/dev/null || return 1; }
+
+valid_id() {
+    case "$1" in ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]*) return 1 ;; esac
+    [ "${#1}" -le 48 ]
+}
+valid_topic() {
+    case "$1" in ''|*[!a-zA-Z0-9_-]*|[-_]*) return 1 ;; esac
+    [ "${#1}" -le 96 ]
+}
+valid_port() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null
+}
+valid_host() {
+    case "$1" in ''|-*|*[!a-zA-Z0-9.:_-]*) return 1 ;; esac
+    [ "${#1}" -le 253 ]
+}
+
+[ "$#" -eq 4 ] || fail 'expected: light-set <id> <power|brightness> <value>'
+[ "$1" = light-set ] || fail 'unsupported action'
+id="$2"; capability="$3"; value="$4"
+valid_id "$id" || fail 'invalid device id'
+
+case "$capability" in
+    power)
+        case "$value" in ON|OFF) ;; *) fail 'power must be ON or OFF' ;; esac
+        command=POWER
+        ;;
+    brightness)
+        case "$value" in 0|[1-9]|[1-9][0-9]|100) ;; *) fail 'brightness must be 0..100' ;; esac
+        command=Dimmer
+        ;;
+    *) fail 'unsupported capability' ;;
+esac
+
+[ "$(get_config jarbis.main.enabled || :)" = 1 ] || fail 'Jarbis is disabled'
+[ "$(get_config "jarbis.$id" || :)" = device ] || fail 'unknown device'
+[ "$(get_config "jarbis.$id.enabled" || :)" = 1 ] || fail 'device is disabled'
+[ "$(get_config "jarbis.$id.kind" || :)" = light ] || fail 'not a light'
+[ "$(get_config "jarbis.$id.protocol" || :)" = tasmota ] || fail 'unsupported protocol'
+topic="$(get_config "jarbis.$id.topic" || :)"
+valid_topic "$topic" || fail 'invalid Tasmota topic'
+
+host="$(get_config jarbis.broker.host || :)"
+port="$(get_config jarbis.broker.port || :)"
+valid_host "$host" || fail 'invalid MQTT host'
+valid_port "$port" || fail 'invalid MQTT port'
+
+command -v "$MQTT_PUB_BIN" >/dev/null 2>&1 || fail 'mosquitto_pub is not installed'
+# mosquitto 2.0 supports XDG_CONFIG_HOME/mosquitto_pub; use this for credentials,
+# never -P on argv where the password could be visible in process listings.
+# The file is manually provisioned with owner root, mode 0600.
+[ "$MQTT_CONFIG_DIR" = /etc/jarbis ] || [ -n "${JARBIS_TEST_MODE:-}" ] || fail 'invalid MQTT config dir'
+if [ -e "$MQTT_CONFIG_DIR/mosquitto_pub" ]; then
+    [ -f "$MQTT_CONFIG_DIR/mosquitto_pub" ] && [ ! -L "$MQTT_CONFIG_DIR/mosquitto_pub" ] || fail 'invalid MQTT client config'
+    # OpenWrt 25.12 BusyBox defaults in SmartSafeHub do not include 'stat'.
+    # BusyBox ls/cut are enough to enforce owner-only read/write permissions.
+    mode="$(LC_ALL=C ls -ld "$MQTT_CONFIG_DIR/mosquitto_pub" 2>/dev/null | cut -c 1-10)"
+    [ "$mode" = '-rw-------' ] || fail 'MQTT client config must be mode 0600'
+fi
+XDG_CONFIG_HOME="$MQTT_CONFIG_DIR" HOME="$MQTT_CONFIG_DIR" \
+    "$MQTT_PUB_BIN" -h "$host" -p "$port" -q 1 \
+    -t "cmnd/$topic/$command" -m "$value" || fail 'MQTT publish failed'

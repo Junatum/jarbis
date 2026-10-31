@@ -1,0 +1,18 @@
+# Jarbis starts disabled. Configure MQTT broker and devices before enabling.
+config core 'main'
+    option enabled '0'
+    option api_version '1'
+
+# Broker is operated separately. A broker is NOT installed by this package.
+# Restrict broker access and authenticate MQTT clients.
+config mqtt 'broker'
+    option host '127.0.0.1'
+    option port '1883'
+
+# Example Tasmota light (uncomment and set matching Tasmota Topic):
+# config device 'living_room'
+#     option enabled '1'
+#     option name '거실 전구'
+#     option kind 'light'
+#     option protocol 'tasmota'
+#     option topic 'livingroom'
