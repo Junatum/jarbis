@@ -42,4 +42,38 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The output should start with 'PASS:'
     The error should be blank
   End
+  It '실제 ucode RPC 함수의 UCI 읽기와 제어 인자를 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-rpc-runtime.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
+  It '패키지 설치 경로와 ACL 및 권한 계약을 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-package-contract.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
+  It '패키지 설치 이후 누락된 RPC 객체를 제한적으로 복구한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-rpcd-reconcile.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
+  It '기기 및 MQTT 인증 설정을 업그레이드 시 보존한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-backup-restore.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
+  It 'CHANGELOG 릴리스 간격과 버전 표기를 확인한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-changelog-spacing.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
 End

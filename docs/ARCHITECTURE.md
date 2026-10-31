@@ -1,4 +1,4 @@
-# Architecture (0.1.0-r3)
+# Architecture (0.1.0-r4)
 
 ```
 SmartSafeHub LuCI (future integration)
@@ -40,3 +40,9 @@ Device ID (stable) + device kind
 - Separate observations from desired state. MQTT publish success does not imply a state change.
 - AI proposes actions but must pass policy/authorization checks and must be optional.
 - Avoid new resident daemons, log-heavy polling or flash write loops until automated events require them.
+
+## Packaging and recovery
+
+- `postinst` invokes `jarbis-rpcd-reconcile` on a running router only (not `IPKG_INSTROOT` staging). It reloads rpcd, verifies the `jarbis` ubus object, and falls back to **at most one** restart with bounded probes. A recovery failure is visible to the package manager.
+- `Package/jarbis/conffiles` and `/lib/upgrade/keep.d/jarbis` retain `/etc/config/jarbis` and an optional `/etc/jarbis/mosquitto_pub` secret, without embedding credentials in the package image.
+- Tests directly execute the ucode core with a mock UCI module and mock publisher, so no MQTT broker or real devices are required in CI. ShellSpec remains the only suite entrypoint.

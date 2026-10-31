@@ -10,3 +10,6 @@
 - MQTT messages use QoS 1 without retain; client success indicates broker acknowledgement only, not physical state.
 - Do not expose or forward port 1883 to WAN. Configure MQTT broker listener/credentials/ACLs explicitly, including for Tasmota devices.
 - Future AI or automation must not bypass authenticated control and must apply policy controls before executing actions.
+
+- The firmware image must never contain an MQTT credential file. Config backups and sysupgrade backups containing `/etc/jarbis/mosquitto_pub` must be treated as sensitive archives and protected accordingly.
+- A post-install rpcd restart is only attempted if reload fails to restore the `jarbis` RPC object; it is not an always-on service or recurring retry loop.

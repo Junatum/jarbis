@@ -1,0 +1,38 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Post-install only. Prefer a reload; restart the shared rpcd at most once
+# when the jarbis ubus object is absent. Never loop indefinitely.
+set -eu
+RPCD_INIT="${JARBIS_RPCD_INIT:-/etc/init.d/rpcd}"
+UBUS_BIN="${JARBIS_UBUS_BIN:-ubus}"
+SLEEP_BIN="${JARBIS_SLEEP_BIN:-sleep}"
+RPC_OBJECT=jarbis
+ATTEMPTS="${JARBIS_RPCD_PROBE_ATTEMPTS:-3}"
+DELAY="${JARBIS_RPCD_PROBE_DELAY_S:-1}"
+case "$ATTEMPTS" in 1|2|3|4|5) ;; *) ATTEMPTS=3 ;; esac
+case "$DELAY" in 0|1|2) ;; *) DELAY=1 ;; esac
+
+has_object() {
+    result="$("$UBUS_BIN" list "$RPC_OBJECT" 2>/dev/null)" || return 1
+    [ "$result" = "$RPC_OBJECT" ]
+}
+probe() {
+    attempt=1
+    while [ "$attempt" -le "$ATTEMPTS" ]; do
+        if has_object; then return 0; fi
+        [ "$attempt" -eq "$ATTEMPTS" ] || "$SLEEP_BIN" "$DELAY"
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+# A successful reload does not guarantee that rpcd re-discovered jarbis.uc.
+if "$RPCD_INIT" reload >/dev/null 2>&1 && probe; then
+    exit 0
+fi
+# Shared process restart is a last resort, not a periodic repair loop.
+if "$RPCD_INIT" restart >/dev/null 2>&1 && probe; then
+    exit 0
+fi
+printf '%s\n' 'jarbis: rpcd object missing after bounded recovery' >&2
+exit 1

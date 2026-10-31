@@ -11,20 +11,18 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 class ProjectContracts(unittest.TestCase):
     def test_버전과_현재_릴리스가_일치한다(self):
-        mk = (ROOT / "Makefile").read_text()
-        self.assertRegex(mk, r"(?m)^PKG_VERSION:=0\.1\.0$")
-        self.assertRegex(mk, r"(?m)^PKG_RELEASE:=3$")
-        notes = (ROOT / "CHANGELOG.md").read_text()
-        self.assertIn("## [0.1.0-r3] - 2026-11-01", notes)
-        self.assertIn('\n\n\n## [0.1.0-r2]', notes)
-        self.assertNotIn('\n\n\n\n## [0.1.0-r2]', notes)
-        self.assertIn("## [0.1.0-r2] - 2026-11-01", notes)
-        self.assertIn("## [0.1.0-r1] - 2026-10-31", notes)
-        self.assertIn('\n\n\n## [0.1.0-r1]', notes)
-        self.assertNotIn('\n\n\n\n## [0.1.0-r1]', notes)
-        self.assertIn("version: '0.1.0-r3'", (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text())
-        self.assertIn("PKG_LICENSE:=GPL-3.0-or-later", mk)
-        self.assertTrue((ROOT / "LICENSE").is_file())
+        import re
+        mk = (ROOT / 'Makefile').read_text()
+        version = re.search(r'(?m)^PKG_VERSION:=(\S+)$', mk)
+        revision = re.search(r'(?m)^PKG_RELEASE:=(\d+)$', mk)
+        self.assertIsNotNone(version)
+        self.assertIsNotNone(revision)
+        release = f'{version.group(1)}-r{revision.group(1)}'
+        notes = (ROOT / 'CHANGELOG.md').read_text()
+        self.assertRegex(notes, r'(?m)^## \[' + re.escape(release) + r'\] - \d{4}-\d{2}-\d{2}$')
+        self.assertIn(f"version: '{release}'", (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text())
+        self.assertIn('PKG_LICENSE:=GPL-3.0-or-later', mk)
+        self.assertTrue((ROOT / 'LICENSE').is_file())
 
     def test_읽기와_쓰기_ACL은_분리하고_공개하지_않는다(self):
         acl = json.loads((ROOT / "root/usr/share/rpcd/acl.d/jarbis.json").read_text())
@@ -85,7 +83,7 @@ class ProjectContracts(unittest.TestCase):
         config = (ROOT / '.shellspec').read_text()
         self.assertIn('--shell sh', config)
         spec = (ROOT / 'spec/contracts_spec.sh').read_text()
-        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh', 'test-openwrt-commands.sh']:
+        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh', 'test-openwrt-commands.sh', 'test-rpc-runtime.sh', 'test-package-contract.sh', 'test-rpcd-reconcile.sh', 'test-backup-restore.sh', 'test-changelog-spacing.sh']:
             self.assertIn('tests/' + name, spec)
         self.assertFalse((ROOT / 'tests/run.sh').exists())
         ci = (ROOT / '.github/workflows/ci.yml').read_text()

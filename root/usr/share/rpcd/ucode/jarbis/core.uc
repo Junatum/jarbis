@@ -20,7 +20,7 @@ export function status() {
     try {
         return success({
             apiVersion: 1,
-            version: '0.1.0-r3',
+            version: '0.1.0-r4',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             features: { lightControl: true, discovery: false, automation: false, ai: false },
@@ -53,10 +53,20 @@ export function devices_list() {
     catch (e) { return failure('CONFIG_UNAVAILABLE', '기기 목록을 읽지 못했습니다.'); }
 };
 
-export function light_set(request) {
-    const id = request?.id;
-    const capability = request?.capability;
-    const value = request?.value;
+// rpcd method parameters are wrapped in request.args, not request itself.
+// Optional publisher is internal test injection; rpcd never supplies it.
+function publish_light_command(id, capability, value, publisher) {
+    const command = ['/usr/libexec/jarbis-control', 'light-set', id, capability, value];
+    // The test publisher exists only as an internal test seam, never a ubus argument.
+    if (type(publisher) == 'function') return publisher(command, 5000);
+    return system(command, 5000);
+};
+
+export function light_set(request, publisher) {
+    const args = request?.args ?? {};
+    const id = args.id;
+    const capability = args.capability;
+    const value = args.value;
     if (type(id) != 'string' || match(id, /^[A-Za-z_][A-Za-z0-9_]{0,47}$/) == null)
         return failure('INVALID_DEVICE', '기기 ID가 올바르지 않습니다.');
     if (capability != 'power' && capability != 'brightness')
@@ -71,7 +81,7 @@ export function light_set(request) {
     try {
         // No shell invocation, no interpolation. The CLI independently verifies UCI
         // device membership, enabled flag, allowed capability and MQTT topic.
-        if (system(['/usr/libexec/jarbis-control', 'light-set', id, capability, value], 5000) != 0)
+        if (publish_light_command(id, capability, value, publisher) != 0)
             return failure('PUBLISH_FAILED', '기기 명령을 전송하지 못했습니다.');
     }
     catch (e) { return failure('PUBLISH_FAILED', '기기 명령을 전송하지 못했습니다.'); }

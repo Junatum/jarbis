@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=jarbis
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=SmartSafeHub Contributors
@@ -43,17 +43,20 @@ define Package/jarbis/install
 	$(INSTALL_CONF) ./root/etc/config/jarbis $(1)/etc/config/jarbis
 	$(INSTALL_DIR) $(1)/usr/libexec
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-control $(1)/usr/libexec/jarbis-control
+	$(INSTALL_BIN) ./root/usr/libexec/jarbis-rpcd-reconcile $(1)/usr/libexec/jarbis-rpcd-reconcile
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/ucode/jarbis
 	$(INSTALL_DATA) ./root/usr/share/rpcd/ucode/jarbis.uc $(1)/usr/share/rpcd/ucode/jarbis.uc
 	$(INSTALL_DATA) ./root/usr/share/rpcd/ucode/jarbis/core.uc $(1)/usr/share/rpcd/ucode/jarbis/core.uc
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
 	$(INSTALL_DATA) ./root/usr/share/rpcd/acl.d/jarbis.json $(1)/usr/share/rpcd/acl.d/jarbis.json
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./root/lib/upgrade/keep.d/jarbis $(1)/lib/upgrade/keep.d/jarbis
 endef
 
 define Package/jarbis/postinst
 #!/bin/sh
 if [ -z "$${IPKG_INSTROOT}" ] && [ -x /etc/init.d/rpcd ]; then
-	/etc/init.d/rpcd reload >/dev/null 2>&1 || true
+	/bin/sh /usr/libexec/jarbis-rpcd-reconcile || exit 1
 fi
 exit 0
 endef

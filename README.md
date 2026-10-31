@@ -4,7 +4,7 @@
 
 SmartSafeHub의 경량 로컬 홈 자동화 엔진입니다. *Iron Man*의 J.A.R.V.I.S.를 패러디한 이름으로, Marvel 공식 제품과 관련이 없습니다. 영문 풀이는 사용자 프로젝트의 원래 표현을 그대로 유지합니다.
 
-- **버전:** 0.1.0-r3 (OpenWrt 25.12 호환성 및 CI 사전 검사 추가)
+- **버전:** 0.1.0-r4 (RPC 런타임 안정화 및 설치·설정 보존 검증 추가)
 - **라이선스:** GPL-3.0-or-later
 - **대상:** OpenWrt 25.12 / SmartSafeHub (기본 기능에 대한 하드웨어별 실기 검증 필요)
 - **런타임:** BusyBox ash, UCI, rpcd-ucode, mosquitto_pub. Python/Node.js/AI 런타임 및 상주 데몬 불필요.
@@ -15,7 +15,8 @@ SmartSafeHub의 경량 로컬 홈 자동화 엔진입니다. *Iron Man*의 J.A.R
 - 등록한 Tasmota 전구의 전원(`POWER`)과 밝기(`Dimmer`) MQTT 명령 송신
 - 전용 MQTT 클라이언트 설정 파일을 이용한 인증 정보 분리 (명령행에 비밀번호 노출하지 않음)
 - 패키지 설치 시 기능 **기본 비활성화**, 브로커 자동 생성/외부 포트 개방 없음
-- ShellSpec 0.28.1 기반 셸 계약 테스트, Python 정적 계약 검사, OpenWrt 25.12 BusyBox 명령 감사, ucode 컴파일 CI
+- ShellSpec 0.28.1 기반 셸 계약 테스트, Python 정적 계약 검사, OpenWrt 25.12 BusyBox 명령 감사, ucode 컴파일 및 실제 RPC 런타임 CI
+- 설치·업데이트 후 누락된 `jarbis` RPC 객체에 대해 제한적 재확인 및 복구; `keep.d`로 UCI/MQTT 자격 증명 보존
 
 **미구현:** 자동 탐색, 상태 수신/동기화, 예약·조건식 자동화, 장면(Scene), AI, SmartSafeHub 프론트엔드 UI. 현재 `light_set`의 `accepted: true`는 **브로커 게시 성공**만 의미하며, 실제 전구 동작 확인은 아닙니다.
 
@@ -58,7 +59,11 @@ shellspec                       # 모든 테스트 실행 (단일 진입점)
 
 CI는 ShellSpec 및 ucode 설치에 앞서 `Verify all tests are included in CI`와 `Verify OpenWrt 25.12 BusyBox compatibility`를 먼저 실행합니다.
 별도의 모의 ucode 컴파일러로 ucode 문법 테스트 자체도 검증합니다. 별도의 전체 테스트 실행 스크립트는 사용하지 않습니다. ShellSpec 또는 Python 3가 없으면 전체 테스트가 실패하며, 누락된 테스트 스크립트가 있으면 실행 전에 실패합니다.
-로컬에 `ucode`가 없으면 셸·JSON·정적 계약 테스트만 실행합니다. CI에서는 `JARBIS_REQUIRE_UCODE=1`로 실제 ucode 컴파일을 필수로 검사합니다.
+로컬에 `ucode`가 없으면 셸·JSON·정적 계약 테스트만 실행합니다. CI에서는 `JARBIS_REQUIRE_UCODE=1`로 실제 ucode 컴파일과 UCI 모의 환경에서의 RPC 함수 실행을 필수로 검사합니다.
+
+새 회귀 테스트는 `tests/test-rpc-runtime.sh`, `tests/test-package-contract.sh`, `tests/test-rpcd-reconcile.sh`, `tests/test-backup-restore.sh`, `tests/test-changelog-spacing.sh`이며 모두 ShellSpec에 직접 등록되어 있습니다. `test-backup-restore.sh`는 `keep.d`에 기록된 경로를 이용한 백업·복원 **모의 테스트**로, 실제 공유기 sysupgrade 검증을 대체하지는 않습니다.
+
+설치·업데이트 시 rpcd는 정상 reload를 우선 사용하며, `jarbis` ubus 객체가 누락된 경우에만 최후 수단으로 **한 번** restart합니다. 재시도 횟수는 제한하며 복구 실패 시 패키지 설치 스크립트가 실패를 알립니다. 이 동작은 공유기의 관리자 연결에 영향을 줄 수 있으므로 실제 기기에서 검증해야 합니다.
 
 ## 개발 원칙
 

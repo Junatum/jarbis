@@ -1,0 +1,4 @@
+# Jarbis devices and manually provisioned MQTT credentials.
+# sysupgrade should preserve both the registered devices and auth settings.
+/etc/config/jarbis
+/etc/jarbis/mosquitto_pub
