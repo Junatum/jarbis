@@ -3,18 +3,23 @@
 """Pure standard library static tests for package/ACL/forward compatibility."""
 import json
 import pathlib
-import re
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 class ProjectContracts(unittest.TestCase):
-    def test_버전과_최초_릴리스가_일치한다(self):
+    def test_버전과_현재_릴리스가_일치한다(self):
         mk = (ROOT / "Makefile").read_text()
         self.assertRegex(mk, r"(?m)^PKG_VERSION:=0\.1\.0$")
-        self.assertRegex(mk, r"(?m)^PKG_RELEASE:=1$")
-        self.assertIn("## [0.1.0-r1] - 2026-10-31", (ROOT / "CHANGELOG.md").read_text())
+        self.assertRegex(mk, r"(?m)^PKG_RELEASE:=2$")
+        notes = (ROOT / "CHANGELOG.md").read_text()
+        self.assertIn("## [0.1.0-r2] - 2026-11-01", notes)
+        self.assertIn("## [0.1.0-r1] - 2026-10-31", notes)
+        self.assertIn('\n\n\n## [0.1.0-r1]', notes)
+        self.assertNotIn('\n\n\n\n## [0.1.0-r1]', notes)
+        self.assertIn("version: '0.1.0-r2'", (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text())
         self.assertIn("PKG_LICENSE:=GPL-3.0-or-later", mk)
         self.assertTrue((ROOT / "LICENSE").is_file())
 
@@ -66,14 +71,32 @@ class ProjectContracts(unittest.TestCase):
         for p in ROOT.rglob('*'):
             self.assertNotIn(p.suffix, {'.wasm', '.apk', '.ipk'})
 
-    def test_테스트_누락시_CI가_실패한다(self):
-        run = (ROOT / 'tests/run.sh').read_text()
-        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh']:
-            self.assertIn(name, run)
+    def test_모듈은_import로_컴파일한다(self):
+        check = (ROOT / 'tests/test-ucode.sh').read_text()
+        self.assertIn('compile_entry "$ENTRY"', check)
+        self.assertIn('compile_entry "$AGGREGATE"', check)
+        self.assertIn('invalid-export.uc', check)
+        self.assertNotIn('compile_entry "$MOD/jarbis/core.uc"', check)
+
+    def test_ShellSpec_전체_테스트와_CI가_연결되어_있다(self):
+        config = (ROOT / '.shellspec').read_text()
+        self.assertIn('--shell sh', config)
+        spec = (ROOT / 'spec/contracts_spec.sh').read_text()
+        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh']:
+            self.assertIn('tests/' + name, spec)
+        self.assertFalse((ROOT / 'tests/run.sh').exists())
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
-        self.assertIn('sh tests/run.sh', ci)
+        self.assertRegex(ci, r'(?m)^\s*run: shellspec\s*$')
+        self.assertNotIn('tests/run.sh', ci)
+        integrity = (ROOT / 'tests/test-suite-integrity.sh').read_text()
+        self.assertIn("[ ! -e \"$ROOT/tests/run.sh\" ]", integrity)
         self.assertIn("JARBIS_REQUIRE_UCODE: '1'", ci)
+        self.assertIn('SHELLSPEC_VERSION: 0.28.1', ci)
 
 
 if __name__ == '__main__':
-    unittest.main(verbosity=2)
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(ProjectContracts)
+    result = unittest.TextTestRunner(verbosity=2, stream=sys.stdout).run(suite)
+    if not result.wasSuccessful():
+        sys.exit(1)
+    print('PASS: Jarbis 정적 계약 테스트')

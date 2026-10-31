@@ -20,7 +20,7 @@ export function status() {
     try {
         return success({
             apiVersion: 1,
-            version: '0.1.0-r1',
+            version: '0.1.0-r2',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             features: { lightControl: true, discovery: false, automation: false, ai: false },

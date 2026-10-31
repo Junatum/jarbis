@@ -16,6 +16,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Install ShellSpec
+        env:
+          SHELLSPEC_VERSION: 0.28.1
+        run: |
+          mkdir -p "$HOME/.local/bin" "$HOME/.local/lib"
+          git clone --depth 1 --branch "$SHELLSPEC_VERSION" \
+            https://github.com/shellspec/shellspec.git "$HOME/.local/lib/shellspec"
+          ln -s "$HOME/.local/lib/shellspec/shellspec" "$HOME/.local/bin/shellspec"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/shellspec" --version
       - name: Install pinned ucode compiler
         env:
           UCODE_REF: 8592205
@@ -30,4 +40,4 @@ jobs:
       - name: Run tests (ucode required)
         env:
           JARBIS_REQUIRE_UCODE: '1'
-        run: sh tests/run.sh
+        run: shellspec

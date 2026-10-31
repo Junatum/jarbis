@@ -76,3 +76,13 @@ Testing/
 bin/
 build/
 dist/
+
+# ShellSpec local runtime files
+.shellspec-local
+.shellspec-quick.log
+report/
+
+# etc
+*.orig
+*.rej
+/*.patch

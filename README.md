@@ -4,7 +4,7 @@
 
 SmartSafeHub의 경량 로컬 홈 자동화 엔진입니다. *Iron Man*의 J.A.R.V.I.S.를 패러디한 이름으로, Marvel 공식 제품과 관련이 없습니다. 영문 풀이는 사용자 프로젝트의 원래 표현을 그대로 유지합니다.
 
-- **버전:** 0.1.0-r1 (첫 프로젝트 스캐폴드)
+- **버전:** 0.1.0-r2 (ucode 컴파일 수정 및 ShellSpec 테스트 도입)
 - **라이선스:** GPL-3.0-or-later
 - **대상:** OpenWrt 25.12 / SmartSafeHub (기본 기능에 대한 하드웨어별 실기 검증 필요)
 - **런타임:** BusyBox ash, UCI, rpcd-ucode, mosquitto_pub. Python/Node.js/AI 런타임 및 상주 데몬 불필요.
@@ -15,7 +15,7 @@ SmartSafeHub의 경량 로컬 홈 자동화 엔진입니다. *Iron Man*의 J.A.R
 - 등록한 Tasmota 전구의 전원(`POWER`)과 밝기(`Dimmer`) MQTT 명령 송신
 - 전용 MQTT 클라이언트 설정 파일을 이용한 인증 정보 분리 (명령행에 비밀번호 노출하지 않음)
 - 패키지 설치 시 기능 **기본 비활성화**, 브로커 자동 생성/외부 포트 개방 없음
-- POSIX 셸 계약 테스트, Python 정적 계약 검사, CI
+- ShellSpec 0.28.1 기반 셸 계약 테스트, Python 정적 계약 검사, ucode 컴파일 CI
 
 **미구현:** 자동 탐색, 상태 수신/동기화, 예약·조건식 자동화, 장면(Scene), AI, SmartSafeHub 프론트엔드 UI. 현재 `light_set`의 `accepted: true`는 **브로커 게시 성공**만 의미하며, 실제 전구 동작 확인은 아닙니다.
 
@@ -50,10 +50,13 @@ ubus call jarbis light_set '{"id":"living_room","capability":"brightness","value
 
 ## 테스트
 
+ShellSpec 0.28.1을 설치한 환경에서 실행합니다. (`luci-app-smartsafehub`와 동일한 버전)
+
 ```sh
-sh tests/run.sh
+shellspec                       # 모든 테스트 실행 (단일 진입점)
 ```
 
+별도의 모의 ucode 컴파일러로 ucode 문법 테스트 자체도 검증합니다. 별도의 전체 테스트 실행 스크립트는 사용하지 않습니다. ShellSpec 또는 Python 3가 없으면 전체 테스트가 실패하며, 누락된 테스트 스크립트가 있으면 실행 전에 실패합니다.
 로컬에 `ucode`가 없으면 셸·JSON·정적 계약 테스트만 실행합니다. CI에서는 `JARBIS_REQUIRE_UCODE=1`로 실제 ucode 컴파일을 필수로 검사합니다.
 
 ## 개발 원칙
