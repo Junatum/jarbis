@@ -62,6 +62,10 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn("'INVALID_CAPABILITY'", source)
         self.assertIn("'INVALID_VALUE'", source)
         self.assertNotIn('password:', source)
+        # ucode arrays use push(array, item), not JavaScript's array.push(item).
+        # A syntax-only compiler check does not catch this runtime error.
+        self.assertNotRegex(source, r'\.\s*push\s*\(')
+        self.assertIn('push(result, {', source)
         cli = (ROOT / 'root/usr/libexec/jarbis-control').read_text()
         self.assertNotIn('eval(', cli)
         self.assertNotRegex(cli, r'(?m)^\s*stat\s')

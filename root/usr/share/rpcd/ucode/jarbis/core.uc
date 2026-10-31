@@ -38,7 +38,7 @@ export function devices_list() {
             // Never return MQTT credentials or arbitrary UCI values to the browser.
             const id = dev['.name'];
             if (type(id) != 'string') return;
-            result.push({
+            push(result, {
                 id: id,
                 name: dev.name ?? id,
                 kind: dev.kind ?? '',

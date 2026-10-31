@@ -72,21 +72,43 @@ import sys
 r = json.loads(pathlib.Path(sys.argv[1]).read_text())
 def require(cond, msg):
     if not cond: raise SystemExit('FAIL: ' + msg)
-require(r['status']['ok'] and r['status']['data']['enabled'] is True, 'UCI enabled 조회')
-require(r['status']['data']['features']['ai'] is False, 'AI 비활성 상태')
-devices = r['devices']['data']['devices']
-require(len(devices) == 2 and devices[0]['id'] == 'living_room', 'UCI 기기 목록')
-require(devices[0]['capabilities'] == ['power', 'brightness'], '지원 capability')
+def success_data(name):
+    response = r.get(name)
+    require(isinstance(response, dict), f'{name} RPC 응답 누락 또는 잘못된 형식: {response!r}')
+    require(response.get('ok') is True,
+            f'{name} RPC 실패: {response.get("error")!r}')
+    data = response.get('data')
+    require(isinstance(data, dict), f'{name} RPC 성공 응답의 data 누락')
+    return data
+
+def expect_error(name, code):
+    response = r.get(name)
+    require(isinstance(response, dict), f'{name} RPC 응답 누락 또는 잘못된 형식: {response!r}')
+    require(response.get('ok') is False, f'{name} RPC 오류가 반환되지 않음')
+    error = response.get('error')
+    require(isinstance(error, dict) and error.get('code') == code,
+            f'{name} RPC 오류 코드: {error!r} (예상: {code})')
+
+status_data = success_data('status')
+require(status_data.get('enabled') is True, 'UCI enabled 조회')
+require(status_data.get('features', {}).get('ai') is False, 'AI 비활성 상태')
+devices_data = success_data('devices')
+devices = devices_data.get('devices')
+require(isinstance(devices, list) and len(devices) == 2, 'UCI 기기 목록 개수')
+require(devices[0].get('id') == 'living_room', 'UCI 기기 ID')
+require(devices[0].get('capabilities') == ['power', 'brightness'], '지원 capability')
 require('must-not-leak' not in json.dumps(r), 'UCI 비밀값 노출')
-require(r['on']['ok'] and r['on']['data']['accepted'], 'request.args 기반 전원 제어')
-require(r['brightness']['ok'], '밝기 제어')
-require(r['publish']['argv'] == ['/usr/libexec/jarbis-control', 'light-set', 'living_room', 'power', 'ON'], '실제 발행 인수')
-require(r['publish']['timeout'] == 5000, '발행 시간 제한')
-require(r['unavailableStatus']['error']['code'] == 'CONFIG_UNAVAILABLE', 'UCI 생성 실패 status')
-require(r['unavailableDevices']['error']['code'] == 'CONFIG_UNAVAILABLE', 'UCI 생성 실패 devices')
+require(success_data('on').get('accepted') is True, 'request.args 기반 전원 제어')
+success_data('brightness')
+published = r.get('publish')
+require(isinstance(published, dict), '실제 MQTT 발행 호출 누락')
+require(published.get('argv') == ['/usr/libexec/jarbis-control', 'light-set', 'living_room', 'power', 'ON'], '실제 발행 인수')
+require(published.get('timeout') == 5000, '발행 시간 제한')
+expect_error('unavailableStatus', 'CONFIG_UNAVAILABLE')
+expect_error('unavailableDevices', 'CONFIG_UNAVAILABLE')
 for field, error in [('topLevelOnly','INVALID_DEVICE'), ('invalidDevice','INVALID_DEVICE'),
                      ('invalidCapability','INVALID_CAPABILITY'), ('invalidValue','INVALID_VALUE'),
                      ('noArgs','INVALID_DEVICE'), ('publishFailed','PUBLISH_FAILED')]:
-    require(not r[field]['ok'] and r[field]['error']['code'] == error, field + ' 오류 코드')
+    expect_error(field, error)
 PYTEST
 printf 'PASS: 실제 ucode RPC 요청 인자·UCI 기기 조회·MQTT 호출 결과 검증\n'
