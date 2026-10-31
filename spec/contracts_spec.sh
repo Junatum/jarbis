@@ -29,6 +29,13 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The error should be blank
   End
 
+  It 'OpenWrt 25.12 BusyBox 기본 명령 및 경량 성능 정책을 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-openwrt-commands.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
   It '새 테스트가 누락되지 않고 CI에서 실행되는지 검증한다'
     When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-suite-integrity.sh"
     The status should be success

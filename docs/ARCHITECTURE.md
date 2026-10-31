@@ -1,4 +1,4 @@
-# Architecture (0.1.0-r1)
+# Architecture (0.1.0-r3)
 
 ```
 SmartSafeHub LuCI (future integration)
