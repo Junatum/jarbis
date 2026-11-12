@@ -1,22 +1,24 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Read one fresh Tasmota STATUS11 reply. No resident poller, credentials in argv,
-# or persistent state files. The RPC creates the private output directory.
+# Read a fresh Tasmota STATUS11 reply over MQTT, with a tightly scoped,
+# read-only HTTP Status 0 fallback for registered LAN devices. Never treat
+# MQTT publication alone as confirmation of the bulb's physical state.
 set -eu
 umask 077
 UCI_BIN="${JARBIS_UCI_BIN:-uci}"
 PUB_BIN="${JARBIS_MQTT_PUB_BIN:-mosquitto_pub}"
 SUB_BIN="${JARBIS_MQTT_SUB_BIN:-mosquitto_sub}"
 JSON_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
+FETCH_BIN="${JARBIS_FETCH_BIN:-uclient-fetch}"
 CONFIG_DIR="${JARBIS_MQTT_CONFIG_DIR:-/etc/jarbis}"
+CACHE="${JARBIS_DISCOVERY_CACHE:-/tmp/jarbis-discovery.records}"
+LEASES="${JARBIS_LEASE_FILE:-/tmp/dhcp.leases}"
 fail() { printf 'jarbis-state: %s\n' "$1" >&2; exit 1; }
 get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
 [ "$#" -eq 2 ] || fail 'expected <device-id> <private-output-directory>'
 id="$1"; output="$2"
 case "$id" in ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]* ) fail 'invalid id' ;; esac
 [ "${#id}" -le 48 ] || fail 'id too long'
-# Do not let untrusted ubus callers choose the destination. The directory is
-# created by native fs.mkdtemp() in the RPC with mode 0700.
 case "$output" in /tmp/jarbis-state-*) ;; *) fail 'invalid output directory' ;; esac
 [ -d "$output" ] && [ ! -L "$output" ] || fail 'missing private output directory'
 [ "$(get jarbis.main.enabled)" = 1 ] || fail 'Jarbis disabled'
@@ -39,34 +41,117 @@ for client in mosquitto_sub mosquitto_pub; do
         [ "$mode" = '-rw-------' ] || fail 'MQTT auth file requires mode 0600'
     fi
 done
-command -v "$SUB_BIN" >/dev/null 2>&1 || fail 'subscriber unavailable'
-command -v "$PUB_BIN" >/dev/null 2>&1 || fail 'publisher unavailable'
 command -v "$JSON_BIN" >/dev/null 2>&1 || fail 'JSON parser unavailable'
-# -W is supported by mosquitto_sub, but not by mosquitto_pub on OpenWrt.
-# Refuse to subscribe if the client cannot bound its wait time.
-"$SUB_BIN" --help 2>&1 | grep -q -- '-W' || fail 'bounded MQTT subscribe unsupported'
-XDG_CONFIG_HOME="$CONFIG_DIR" HOME="$CONFIG_DIR" \
-    "$SUB_BIN" -h "$host" -p "$port" -W 3 -C 1 -R \
-    -t "stat/$topic/STATUS11" > "$output/reply" 2>/dev/null &
-subpid="$!"
-trap 'kill "$subpid" 2>/dev/null || :; wait "$subpid" 2>/dev/null || :' EXIT HUP INT TERM
-# Establish the subscription before sending the request or the short-lived
-# STATUS11 response can be lost. At most one second of setup per selected bulb.
-sleep 1
-if ! XDG_CONFIG_HOME="$CONFIG_DIR" HOME="$CONFIG_DIR" \
-    "$PUB_BIN" -h "$host" -p "$port" -q 1 -t "cmnd/$topic/Status" -m 11 >/dev/null 2>&1; then
-    fail 'query publish failed'
-fi
-wait "$subpid" || fail 'no STATUS11 reply'
-trap - EXIT HUP INT TERM
-[ -s "$output/reply" ] || fail 'empty STATUS11 reply'
-# Read only expected fields, never let arbitrary JSON escape into the RPC/UI.
-read_field() { "$JSON_BIN" -i "$output/reply" -e "@.StatusSTS.$1" 2>/dev/null || :; }
-power="$(read_field POWER)"; dimmer="$(read_field Dimmer)"
-color="$(read_field Color)"; ct="$(read_field CT)"
-case "$power" in ON|OFF) ;; *) fail 'invalid power status' ;; esac
-case "$dimmer" in ''|*[!0-9]*) dimmer='' ;; *) [ "$dimmer" -le 100 ] 2>/dev/null || dimmer='' ;; esac
-case "$color" in ''|*[!a-fA-F0-9]*) color='' ;; *) color="$(printf '%.6s' "$color" | tr 'a-f' 'A-F')" ;; esac
-[ "${#color}" -eq 6 ] || color=''
-case "$ct" in ''|*[!0-9]*) ct='' ;; *) [ "$ct" -ge 153 ] 2>/dev/null && [ "$ct" -le 500 ] 2>/dev/null || ct='' ;; esac
-printf '%s|%s|%s|%s\n' "$power" "$dimmer" "$color" "$ct" > "$output/state"
+
+# Parse only bounded, expected status fields. A reported POWER is required;
+# brightness, RGB, and CT may legitimately be absent on some Tasmota models.
+parse_status() {
+    file="$1"; origin="$2"
+    [ -f "$file" ] && [ ! -L "$file" ] && [ -s "$file" ] || return 1
+    [ "$(wc -c < "$file")" -le 16384 ] || return 1
+    if [ "$origin" = http ]; then
+        # The LAN IP can be reassigned: never accept a reply from a device
+        # that does not claim the topic of the registered bulb.
+        reported_topic="$("$JSON_BIN" -i "$file" -e '@.Status.Topic' 2>/dev/null || :)"
+        [ "$reported_topic" = "$topic" ] || return 1
+    fi
+    power="$("$JSON_BIN" -i "$file" -e '@.StatusSTS.POWER' 2>/dev/null || :)"
+    case "$power" in ON|OFF) ;; *) return 1 ;; esac
+    dimmer="$("$JSON_BIN" -i "$file" -e '@.StatusSTS.Dimmer' 2>/dev/null || :)"
+    color="$("$JSON_BIN" -i "$file" -e '@.StatusSTS.Color' 2>/dev/null || :)"
+    ct="$("$JSON_BIN" -i "$file" -e '@.StatusSTS.CT' 2>/dev/null || :)"
+    case "$dimmer" in ''|*[!0-9]*) dimmer='' ;; *) [ "$dimmer" -le 100 ] 2>/dev/null || dimmer='' ;; esac
+    case "$color" in ''|*[!a-fA-F0-9]*) color='' ;; *) color="$(printf '%.6s' "$color" | tr 'a-f' 'A-F')" ;; esac
+    [ "${#color}" -eq 6 ] || color=''
+    case "$ct" in ''|*[!0-9]*) ct='' ;; *) [ "$ct" -ge 153 ] 2>/dev/null && [ "$ct" -le 500 ] 2>/dev/null || ct='' ;; esac
+    printf '%s|%s|%s|%s\n' "$power" "$dimmer" "$color" "$ct" > "$output/state"
+    printf '%s\n' "$origin" > "$output/source"
+}
+
+mqtt_query() {
+    command -v "$SUB_BIN" >/dev/null 2>&1 || return 1
+    command -v "$PUB_BIN" >/dev/null 2>&1 || return 1
+    # Some OpenWrt client builds omit -W. Never start an unbounded subscriber.
+    "$SUB_BIN" --help 2>&1 | grep -q -- '-W' || return 1
+    XDG_CONFIG_HOME="$CONFIG_DIR" HOME="$CONFIG_DIR" \
+        "$SUB_BIN" -h "$host" -p "$port" -W 3 -C 1 -R \
+        -t "stat/$topic/STATUS11" > "$output/reply" 2>/dev/null &
+    subpid="$!"
+    # Subscriber must be established before requesting a fresh STATUS11.
+    sleep 1
+    if ! XDG_CONFIG_HOME="$CONFIG_DIR" HOME="$CONFIG_DIR" \
+        "$PUB_BIN" -h "$host" -p "$port" -q 1 -t "cmnd/$topic/Status" -m 11 >/dev/null 2>&1; then
+        kill "$subpid" 2>/dev/null || :
+        wait "$subpid" 2>/dev/null || :
+        return 1
+    fi
+    if ! wait "$subpid"; then return 1; fi
+    parse_status "$output/reply" mqtt
+}
+
+valid_ip() {
+    case "$1" in ''|*[!0-9.]*|.*|*.|0.*|127.*|169.254.*|224.*|255.*) return 1 ;; esac
+    oldifs="$IFS"; IFS=.; set -- $1; IFS="$oldifs"
+    [ "$#" -eq 4 ] || return 1
+    for octet do
+        [ -n "$octet" ] && [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null || return 1
+    done
+}
+
+# Never scan arbitrary networks. Only use the last approved discovery IP,
+# stored device IP or one DHCP lease whose MAC matches the known identity.
+http_candidate() {
+    ip="$(get "jarbis.$id.ip")"
+    mac="$(get "jarbis.$id.mac")"
+    if [ -f "$CACHE" ] && [ ! -L "$CACHE" ]; then
+        count=0
+        while IFS='|' read -r source foundip foundmac foundtopic name; do
+            count=$((count + 1)); [ "$count" -le 64 ] || break
+            if [ "$source" = http ] && [ "$foundtopic" = "$topic" ]; then
+                ip="$foundip"; mac="$foundmac"; break
+            fi
+        done < "$CACHE"
+    fi
+    # Handle already-registered devices with older config (no MAC stored).
+    # For the standard tasmota_XXXXXX topic, its suffix is the MAC suffix.
+    if [ -z "$mac" ]; then
+        suffix="${topic##*_}"
+        if [ "${#suffix}" -eq 6 ] && [ -z "$(printf '%s' "$suffix" | tr -d 'A-Fa-f0-9')" ]; then
+            mac_suffix="$(printf '%s' "$suffix" | tr A-F a-f)"
+        else
+            mac_suffix=''
+        fi
+    else
+        case "$mac" in *[!a-fA-F0-9:]*|'') mac_suffix='' ;;
+            *) mac_suffix="$(printf '%s' "$mac" | tr -d ':' | tr A-F a-f | tail -c 7)" ;; esac
+    fi
+    if [ -n "$mac_suffix" ] && [ -f "$LEASES" ] && [ ! -L "$LEASES" ]; then
+        count=0
+        while read -r expires lease_mac lease_ip hostname clientid; do
+            count=$((count + 1)); [ "$count" -le 128 ] || break
+            found_suffix="$(printf '%s' "$lease_mac" | tr -d ':' | tr A-F a-f | tail -c 7)"
+            if [ "$found_suffix" = "$mac_suffix" ]; then ip="$lease_ip"; break; fi
+        done < "$LEASES"
+    fi
+    lan="$(get jarbis.broker.lan_ip)"
+    [ -n "$lan" ] || lan="$(get network.lan.ipaddr)"
+    lan="${lan%%/*}"
+    valid_ip "$lan" && valid_ip "$ip" || return 1
+    case "$ip" in "${lan%.*}."*) ;; *) return 1 ;; esac
+    [ "$ip" != "$lan" ] || return 1
+    printf '%s' "$ip"
+}
+
+http_query() {
+    command -v "$FETCH_BIN" >/dev/null 2>&1 || return 1
+    target="$(http_candidate)" || return 1
+    # Read-only HTTP request; fixed numeric LAN IP, no proxy and no user
+    # credentials. Never send a configuration command as a status fallback.
+    "$FETCH_BIN" -q -Y off -T 2 -O "$output/http" \
+        "http://$target/cm?cmnd=Status%200" >/dev/null 2>&1 || return 1
+    parse_status "$output/http" http
+}
+
+if mqtt_query; then exit 0; fi
+if http_query; then exit 0; fi
+fail 'no verified MQTT or LAN HTTP state response'

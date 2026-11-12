@@ -106,6 +106,18 @@ class ProjectContracts(unittest.TestCase):
         self.assertNotRegex(broker, r'(?m)^\s*mosquitto_pub\s+.*\s-W\s')
         self.assertIn("fail 'MQTT connection failed'", broker)
 
+    def test_등록된_전구의_로컬_상태_조회는_안전한_조회만_사용한다(self):
+        helper = (ROOT / 'root/usr/libexec/jarbis-state').read_text()
+        core = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
+        self.assertIn('parse_status "$output/http" http', helper)
+        self.assertIn("'@.Status.Topic'", helper)
+        self.assertIn('"$reported_topic" = "$topic"', helper)
+        self.assertIn('valid_ip "$lan" && valid_ip "$ip"', helper)
+        self.assertIn('"http://$target/cm?cmnd=Status%200"', helper)
+        self.assertIn('"$FETCH_BIN" -q -Y off -T 2', helper)
+        self.assertNotIn('password=', helper)
+        self.assertIn("source: source == 'mqtt' || source == 'http'", core)
+
     def test_프론트엔드_빌드_산출물이_없다(self):
         self.assertFalse((ROOT / 'frontend').exists())
         for p in ROOT.rglob('*'):
@@ -151,7 +163,7 @@ class ProjectContracts(unittest.TestCase):
         mk = (ROOT / 'Makefile').read_text()
         cli = (ROOT / 'root/usr/libexec/jarbis-pair').read_text()
         rpc = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
-        self.assertIn('PKG_RELEASE:=8', mk)
+        self.assertIn('PKG_RELEASE:=9', mk)
         self.assertIn('./root/usr/libexec/jarbis-pair', mk)
         self.assertIn('export function device_pair(', rpc)
         self.assertIn("mkdtemp('/tmp/jarbis-pair-XXXXXX')", rpc)
