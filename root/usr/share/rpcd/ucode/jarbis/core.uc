@@ -27,7 +27,7 @@ export function status(checker) {
         }
         return success({
             apiVersion: 1,
-            version: '0.1.0-r9',
+            version: '0.1.0-r10',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',
@@ -116,19 +116,22 @@ export function light_state(request, executor, fsops) {
     let path = null;
     let raw = null;
     let source = null;
+    let reason = null;
     try {
         path = io.mkdtemp('/tmp/jarbis-state-XXXXXX');
         if (path) {
             const command = ['/usr/libexec/jarbis-state', id, path];
-            const rc = type(executor) == 'function' ? executor(command, 6500) : system(command, 6500);
+            const rc = type(executor) == 'function' ? executor(command, 9500) : system(command, 9500);
             if (rc == 0) {
                 raw = trim(io.readfile(path + '/state', 128) ?? '');
                 source = trim(io.readfile(path + '/source', 16) ?? '');
+            } else {
+                reason = trim(io.readfile(path + '/reason', 32) ?? '');
             }
         }
     } catch (e) { raw = null; }
     if (path) {
-        for (let name in ['reply', 'http', 'state', 'source']) {
+        for (let name in ['reply', 'http', 'state', 'source', 'reason']) {
             try { io.unlink(path + '/' + name); } catch (e) { /* best effort */ }
         }
         try { io.rmdir(path); } catch (e) { /* best effort */ }
@@ -136,7 +139,9 @@ export function light_state(request, executor, fsops) {
     const fields = split(raw ?? '', '|');
     if (length(fields) != 4 || (fields[0] != 'ON' && fields[0] != 'OFF'))
         return success({ id: id, observed: false, power: null,
-                         brightness: null, color: null, colorTemperature: null, source: null });
+                         brightness: null, color: null, colorTemperature: null, source: null,
+                         reason: match(reason ?? '', /^HTTP_(NO_CANDIDATE|CLIENT_MISSING|FETCH_FAILED|INVALID_STATE)$/) != null
+                             ? reason : 'STATE_TIMEOUT_OR_UNAVAILABLE' });
     const d = fields[1], c = fields[2], ct = fields[3];
     return success({
         id: id, observed: true, source: source == 'mqtt' || source == 'http' ? source : null, power: fields[0],

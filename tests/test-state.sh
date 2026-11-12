@@ -36,7 +36,8 @@ cat > "$TMP/jsonfilter" <<'MOCK'
 #!/bin/sh
 case "$*" in
  *Status.Topic*) [ "${MOCK_TOPIC_MISMATCH:-0}" = 1 ] && echo wrong_device || echo tasmota_CB0735 ;;
- *StatusSTS.POWER*) echo ON ;;
+ *StatusSTS.POWER1*) [ "${MOCK_POWER1:-0}" = 1 ] && echo ON || exit 1 ;;
+ *StatusSTS.POWER*) [ "${MOCK_POWER1:-0}" = 1 ] || echo ON ;;
  *StatusSTS.Dimmer*) echo 50 ;;
  *StatusSTS.Color*) echo FF80400000 ;;
  *StatusSTS.CT*) echo 250 ;;
@@ -79,6 +80,15 @@ RECORD
 sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" || fail 'MQTT 오류 후 LAN HTTP 상태 조회 실패'
 [ "$(cat "$OUTPUT/state")" = 'ON|50|FF8040|250' ] || fail 'HTTP 응답 상태 파싱 실패'
 [ "$(cat "$OUTPUT/source")" = http ] || fail 'HTTP 응답 출처 누락'
+# A verified HTTP bulb is checked first, without waiting for MQTT timeouts.
+: > "$MOCK_SUB_LOG"
+: > "$MOCK_PUB_LOG"
+sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" || fail 'HTTP 우선 조회 실패'
+[ ! -s "$MOCK_SUB_LOG" ] && [ ! -s "$MOCK_PUB_LOG" ] || fail 'HTTP 성공 후 불필요한 MQTT 요청 발생'
+MOCK_POWER1=1; export MOCK_POWER1
+sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" || fail 'POWER1 상태 파싱 실패'
+[ "$(cat "$OUTPUT/state")" = 'ON|50|FF8040|250' ] || fail 'POWER1 상태 검증 실패'
+unset MOCK_POWER1
 rm -f "$OUTPUT/state" "$OUTPUT/source"
 MOCK_TOPIC_MISMATCH=1; export MOCK_TOPIC_MISMATCH
 if sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" >"$TMP/out" 2>"$TMP/err"; then fail '다른 Topic 장치의 상태를 허용함'; fi
@@ -89,6 +99,12 @@ if sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" >"$TMP/out" 2>"$TMP/e
 unset MOCK_BAD_LAN
 MOCK_HTTP_FAILED=1; export MOCK_HTTP_FAILED
 if sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" >"$TMP/out" 2>"$TMP/err"; then fail 'HTTP 연결 실패를 성공 처리함'; fi
+[ "$(cat "$OUTPUT/reason")" = HTTP_FETCH_FAILED ] || fail 'HTTP 실패 진단 코드 누락'
+# An unreachable HTTP API does not prevent a valid MQTT STATUS11 response.
+unset MOCK_NO_REPLY
+sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" || fail 'HTTP 실패 후 MQTT 대체 조회 실패'
+[ "$(cat "$OUTPUT/source")" = mqtt ] || fail 'MQTT 대체 응답 출처 누락'
+MOCK_NO_REPLY=1; export MOCK_NO_REPLY
 unset MOCK_HTTP_FAILED
 unset MOCK_NO_REPLY
 if sh "$ROOT/root/usr/libexec/jarbis-state" bulb '../../bad'  "$OUTPUT" >"$TMP/out" 2>"$TMP/err"; then fail '잘못된 ID 허용'; fi

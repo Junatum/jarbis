@@ -109,7 +109,7 @@ const result = {
     badColor: light_set({ args: { id: 'living_room', capability: 'color', value: '#FF0000' } }, mock_publish),
     badCT: light_set({ args: { id: 'living_room', capability: 'color_temperature', value: '999' } }, mock_publish),
     state: light_state({ args: { id: 'living_room' } }, function(argv, timeout) {
-        return argv[0] == '/usr/libexec/jarbis-state' && timeout == 6500 ? 0 : 1;
+        return argv[0] == '/usr/libexec/jarbis-state' && timeout == 9500 ? 0 : 1;
     }, {
         mkdtemp: function() { return '/tmp/jarbis-state-MOCK12'; },
         readfile: function() { return 'ON|55|FF8800|250\n'; },

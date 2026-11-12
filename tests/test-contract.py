@@ -25,6 +25,17 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn('./root/usr/libexec/jarbis-manage', mk)
         self.assertTrue((ROOT / 'LICENSE').is_file())
 
+    def test_전구_상태는_HTTP_우선으로_조회하고_실패_원인을_구분한다(self):
+        helper = (ROOT / 'root/usr/libexec/jarbis-state').read_text()
+        core = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
+        self.assertLess(helper.index('if http_query; then exit 0'), helper.index('if mqtt_query; then exit 0'))
+        self.assertIn("'@.StatusSTS.POWER1'", helper)
+        self.assertIn('HTTP_FETCH_FAILED', helper)
+        self.assertIn('HTTP_INVALID_STATE', helper)
+        self.assertIn("'/reason'", core)
+        self.assertIn('9500', core)
+        self.assertIn('reason: match(reason', core)
+
     def test_읽기와_쓰기_ACL은_분리하고_공개하지_않는다(self):
         acl = json.loads((ROOT / "root/usr/share/rpcd/acl.d/jarbis.json").read_text())
         self.assertEqual(acl['jarbis']['read']['ubus']['jarbis'], ['status', 'devices_list', 'light_state', 'discovery_list'])
@@ -114,7 +125,7 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn('"$reported_topic" = "$topic"', helper)
         self.assertIn('valid_ip "$lan" && valid_ip "$ip"', helper)
         self.assertIn('"http://$target/cm?cmnd=Status%200"', helper)
-        self.assertIn('"$FETCH_BIN" -q -Y off -T 2', helper)
+        self.assertIn('"$FETCH_BIN" -q -Y off -T 3', helper)
         self.assertNotIn('password=', helper)
         self.assertIn("source: source == 'mqtt' || source == 'http'", core)
 
@@ -163,7 +174,7 @@ class ProjectContracts(unittest.TestCase):
         mk = (ROOT / 'Makefile').read_text()
         cli = (ROOT / 'root/usr/libexec/jarbis-pair').read_text()
         rpc = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
-        self.assertIn('PKG_RELEASE:=9', mk)
+        self.assertIn('PKG_RELEASE:=10', mk)
         self.assertIn('./root/usr/libexec/jarbis-pair', mk)
         self.assertIn('export function device_pair(', rpc)
         self.assertIn("mkdtemp('/tmp/jarbis-pair-XXXXXX')", rpc)

@@ -42,6 +42,8 @@ for client in mosquitto_sub mosquitto_pub; do
     fi
 done
 command -v "$JSON_BIN" >/dev/null 2>&1 || fail 'JSON parser unavailable'
+http_reason=HTTP_NO_CANDIDATE
+mqtt_reason=MQTT_UNAVAILABLE
 
 # Parse only bounded, expected status fields. A reported POWER is required;
 # brightness, RGB, and CT may legitimately be absent on some Tasmota models.
@@ -56,6 +58,8 @@ parse_status() {
         [ "$reported_topic" = "$topic" ] || return 1
     fi
     power="$("$JSON_BIN" -i "$file" -e '@.StatusSTS.POWER' 2>/dev/null || :)"
+    # Some multi-output Tasmota templates expose POWER1 instead of POWER.
+    case "$power" in ON|OFF) ;; *) power="$("$JSON_BIN" -i "$file" -e '@.StatusSTS.POWER1' 2>/dev/null || :)" ;; esac
     case "$power" in ON|OFF) ;; *) return 1 ;; esac
     dimmer="$("$JSON_BIN" -i "$file" -e '@.StatusSTS.Dimmer' 2>/dev/null || :)"
     color="$("$JSON_BIN" -i "$file" -e '@.StatusSTS.Color' 2>/dev/null || :)"
@@ -143,15 +147,27 @@ http_candidate() {
 }
 
 http_query() {
-    command -v "$FETCH_BIN" >/dev/null 2>&1 || return 1
-    target="$(http_candidate)" || return 1
-    # Read-only HTTP request; fixed numeric LAN IP, no proxy and no user
-    # credentials. Never send a configuration command as a status fallback.
-    "$FETCH_BIN" -q -Y off -T 2 -O "$output/http" \
-        "http://$target/cm?cmnd=Status%200" >/dev/null 2>&1 || return 1
-    parse_status "$output/http" http
+    command -v "$FETCH_BIN" >/dev/null 2>&1 || { http_reason=HTTP_CLIENT_MISSING; return 1; }
+    target="$(http_candidate)" || { http_reason=HTTP_NO_CANDIDATE; return 1; }
+    # Prefer an identity-verified LAN HTTP request: it avoids waiting for a
+    # 3-second MQTT timeout before checking a reachable registered light.
+    # No device credentials, proxy, redirection to other hosts, or changes.
+    if ! "$FETCH_BIN" -q -Y off -T 3 -O "$output/http" \
+        "http://$target/cm?cmnd=Status%200" >/dev/null 2>&1; then
+        http_reason=HTTP_FETCH_FAILED
+        return 1
+    fi
+    if ! parse_status "$output/http" http; then
+        http_reason=HTTP_INVALID_STATE
+        return 1
+    fi
+    return 0
 }
 
-if mqtt_query; then exit 0; fi
+# HTTP-first stays bounded to a known LAN device; MQTT remains a fallback for
+# Tasmota devices with a password-protected or disabled HTTP interface.
 if http_query; then exit 0; fi
+if mqtt_query; then exit 0; fi
+# Persist only fixed error codes in private tmpfs for a useful UI diagnostic.
+printf '%s\n' "$http_reason" > "$output/reason"
 fail 'no verified MQTT or LAN HTTP state response'
