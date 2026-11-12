@@ -36,6 +36,12 @@ export function cursor() {
     };
 };
 STUB
+# Mock the optional native fs module from OpenWrt in this isolated host test.
+# The injected reader tests discovery parsing; this null stub covers the
+# actual cache-missing fallback without reading any host filesystem state.
+cat > "$TMP/fs.uc" <<'STUB'
+export function readfile(path, limit) { return null; };
+STUB
 cat > "$RUNNER" <<'UCRUN'
 import { status, devices_list, light_set, discovery_list, discovery_scan } from './jarbis/core.uc';
 import { set_unavailable } from 'uci';
@@ -47,6 +53,7 @@ const mock_publish = function(argv, timeout) {
 const result = {
     status: status(),
     devices: devices_list(),
+    discoveredMissing: discovery_list(),
     discovered: discovery_list(function(path, limit) {
         return 'http|192.168.1.172|40:f5:20:cb:07:35|aiyato_cb0735|AiYaTo\n' +
                'mqtt|192.168.1.172|40:f5:20:cb:07:35|aiyato_cb0735|AiYaTo\n' +
@@ -112,6 +119,7 @@ require(isinstance(devices, list) and len(devices) == 2, 'UCI 기기 목록 개�
 require(devices[0].get('id') == 'living_room', 'UCI 기기 ID')
 require(devices[0].get('capabilities') == ['power', 'brightness'], '지원 capability')
 require('must-not-leak' not in json.dumps(r), 'UCI 비밀값 노출')
+require(len(success_data('discoveredMissing')['devices']) == 0, '캐시 파일이 없는 경우 빈 목록 반환')
 require(len(success_data('discovered')['devices']) == 1, '중복 및 위험 기기 검색 결과 필터링')
 require(len(success_data('scan')['devices']) == 1, '검색 RPC 실행 및 결과 수신')
 require(success_data('on').get('accepted') is True, 'request.args 기반 전원 제어')

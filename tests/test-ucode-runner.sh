@@ -12,15 +12,20 @@ cat > "$TMP/ucode" <<'MOCK'
 set -eu
 output=''
 source=''
+mockdir=''
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -o) output="$2"; shift 2 ;;
-        -L) shift 2 ;;
+        -L) [ -n "$mockdir" ] || mockdir="$2"; shift 2 ;;
         -c) shift ;;
         *) source="$1"; shift ;;
     esac
 done
 [ -n "$output" ] && [ -n "$source" ] || exit 1
+# Both mock imports must be available during the real CI compile. Fail if
+# either is missing so that an optional OpenWrt module cannot break CI again.
+[ -f "$mockdir/uci.uc" ] && [ -f "$mockdir/fs.uc" ] || exit 1
+grep -Fq 'export function readfile(path, limit)' "$mockdir/fs.uc" || exit 1
 case "$source" in
     */jarbis.uc)
         grep -Fq "from './jarbis/core.uc';" "$source" || exit 1

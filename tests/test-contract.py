@@ -85,6 +85,17 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn('invalid-export.uc', check)
         self.assertNotIn('compile_entry "$MOD/jarbis/core.uc"', check)
 
+    def test_호스트_ucode_테스트는_파일시스템_모듈을_격리한다(self):
+        mk = (ROOT / 'Makefile').read_text()
+        self.assertIn('+ucode-mod-fs', mk)
+        for script in ['test-ucode.sh', 'test-rpc-runtime.sh']:
+            with self.subTest(script=script):
+                source = (ROOT / 'tests' / script).read_text()
+                self.assertIn('cat > "$TMP/fs.uc"', source)
+                self.assertIn('export function readfile(path, limit)', source)
+                self.assertIn('-L "$TMP"', source)
+
+
     def test_ShellSpec_전체_테스트와_CI가_연결되어_있다(self):
         config = (ROOT / '.shellspec').read_text()
         self.assertIn('--shell sh', config)

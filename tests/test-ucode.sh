@@ -25,6 +25,13 @@ trap 'rm -rf "$TMP"; rm -f "$AGGREGATE"' EXIT HUP INT TERM
 cat > "$TMP/uci.uc" <<'STUB'
 export function cursor() { return null; };
 STUB
+# The CI compiler is built without optional OpenWrt runtime plugins. Its
+# module import graph still has to resolve, so mock the fs *module* (as we do
+# for uci) without skipping syntax compilation of the real Jarbis sources.
+# On the router, ucode-mod-fs supplies the real native implementation.
+cat > "$TMP/fs.uc" <<'STUB'
+export function readfile(path, limit) { return null; };
+STUB
 
 compile_entry() {
     source_file="$1"
