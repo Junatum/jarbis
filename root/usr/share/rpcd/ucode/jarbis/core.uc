@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 'use strict';
 import { cursor } from 'uci';
+import { readfile } from 'fs';
 
 export function success(data) {
     return { ok: true, data: data, error: null };
@@ -20,10 +21,11 @@ export function status() {
     try {
         return success({
             apiVersion: 1,
-            version: '0.1.0-r4',
+            version: '0.1.0-r5',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
-            features: { lightControl: true, discovery: false, automation: false, ai: false },
+            brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',
+            features: { lightControl: true, discovery: true, mqttDiscovery: true, automation: false, ai: false },
         });
     }
     catch (e) { return failure('CONFIG_UNAVAILABLE', 'Jarbis 설정을 읽지 못했습니다.'); }
@@ -86,4 +88,57 @@ export function light_set(request, publisher) {
     }
     catch (e) { return failure('PUBLISH_FAILED', '기기 명령을 전송하지 못했습니다.'); }
     return success({ accepted: true, id: id, capability: capability, value: value });
+};
+
+// The cache contains only validated, non-secret candidate fields. It is not a
+// registry and never grants control of a discovered device.
+export function discovery_list(reader) {
+    const cfg = config_cursor();
+    if (!cfg) return failure('CONFIG_UNAVAILABLE', '검색 설정을 읽지 못했습니다.');
+    let entries = [];
+    let seen = {};
+    let registered = {};
+    try {
+        cfg.foreach('jarbis', 'device', function(dev) {
+            if (type(dev.topic) == 'string' && dev.protocol == 'tasmota')
+                registered[dev.topic] = true;
+        });
+        const raw = (type(reader) == 'function'
+            ? reader('/tmp/jarbis-discovery.records', 8192)
+            : readfile('/tmp/jarbis-discovery.records', 8192)) ?? '';
+        for (let line in split(raw, '\n')) {
+            const fields = split(line, '|');
+            if (length(fields) != 5) continue;
+            const source = fields[0], ip = fields[1], mac = fields[2];
+            const topic = fields[3], name = fields[4];
+            if (source != 'http' && source != 'mqtt') continue;
+            if (topic && match(topic, /^[A-Za-z0-9_-]{1,96}$/) == null) continue;
+            if (ip && match(ip, /^[0-9.]{7,15}$/) == null) continue;
+            if (mac && match(mac, /^[a-fA-F0-9:]{12,17}$/) == null) continue;
+            if (match(name, /^[A-Za-z0-9 _-]{1,48}$/) == null) continue;
+            let key = ip || mac || topic;
+            if (!key || seen[key]) continue;
+            seen[key] = true;
+            push(entries, { protocol: 'tasmota', source: source, ip: ip,
+                            mac: mac, topic: topic, name: name, registered: !!registered[topic] });
+            if (length(entries) >= 32) break;
+        }
+        return success({ devices: entries });
+    }
+    catch (e) { return failure('DISCOVERY_UNAVAILABLE', '검색 결과를 읽지 못했습니다.'); }
+};
+
+export function discovery_scan(request, scanner, reader) {
+    const cfg = config_cursor();
+    if (!cfg) return failure('CONFIG_UNAVAILABLE', '검색 설정을 읽지 못했습니다.');
+    try {
+        if (cfg.get('jarbis', 'main', 'enabled') != '1' ||
+            cfg.get('jarbis', 'discovery', 'enabled') != '1')
+            return failure('DISCOVERY_DISABLED', '기기 검색이 비활성화되어 있습니다.');
+        const cmd = ['/usr/libexec/jarbis-discover', 'scan'];
+        const rc = type(scanner) == 'function' ? scanner(cmd, 25000) : system(cmd, 25000);
+        if (rc != 0) return failure('DISCOVERY_FAILED', '기기 검색을 완료하지 못했습니다.');
+        return discovery_list(reader);
+    }
+    catch (e) { return failure('DISCOVERY_FAILED', '기기 검색을 완료하지 못했습니다.'); }
 };

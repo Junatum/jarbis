@@ -1,15 +1,20 @@
-# Jarbis starts disabled. Configure MQTT broker and devices before enabling.
+# Disabled until the user enables Jarbis. No WAN firewall changes.
 config core 'main'
     option enabled '0'
     option api_version '1'
 
-# Broker is operated separately. A broker is NOT installed by this package.
-# Restrict broker access and authenticate MQTT clients.
+# Local managed Mosquitto is provisioned when the service starts.
+# Use external mode for any existing broker to avoid overwriting settings.
 config mqtt 'broker'
+    option mode 'managed'
     option host '127.0.0.1'
     option port '1883'
+    option managed_ready '0'
 
-# Example Tasmota light (uncomment and set matching Tasmota Topic):
+config discovery 'discovery'
+    option enabled '1'
+
+# Found devices are only candidates; adding them remains a user action.
 # config device 'living_room'
 #     option enabled '1'
 #     option name '거실 전구'

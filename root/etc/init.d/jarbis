@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Only active when explicitly enabled. Mosquitto owns its own procd process.
+START=81
+STOP=19
+start() {
+    [ "$(uci -q get jarbis.main.enabled 2>/dev/null)" = 1 ] || return 0
+    [ "$(uci -q get jarbis.broker.mode 2>/dev/null)" = managed ] || return 0
+    /usr/libexec/jarbis-broker start
+}
+stop() {
+    # Never stop a shared broker that other applications may use.
+    :
+}

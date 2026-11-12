@@ -1,7 +1,22 @@
 {
   "jarbis": {
     "description": "Grant authenticated users access to the Jarbis home automation API",
-    "read": { "ubus": { "jarbis": ["status", "devices_list"] } },
-    "write": { "ubus": { "jarbis": ["light_set"] } }
+    "read": {
+      "ubus": {
+        "jarbis": [
+          "status",
+          "devices_list",
+          "discovery_list"
+        ]
+      }
+    },
+    "write": {
+      "ubus": {
+        "jarbis": [
+          "light_set",
+          "discovery_scan"
+        ]
+      }
+    }
   }
 }

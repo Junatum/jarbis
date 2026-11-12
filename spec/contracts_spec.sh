@@ -76,4 +76,17 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The output should start with 'PASS:'
     The error should be blank
   End
+  It '관리형 MQTT 브로커 자동 설정과 기존 설정 보호를 확인한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-broker.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
+  It 'DHCP 및 Tasmota MQTT 자동 검색과 탐색 제한을 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-discovery.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
 End

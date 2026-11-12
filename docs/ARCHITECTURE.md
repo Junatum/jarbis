@@ -1,4 +1,4 @@
-# Architecture (0.1.0-r4)
+# Architecture (0.1.0-r5)
 
 ```
 SmartSafeHub LuCI (future integration)
@@ -6,23 +6,27 @@ SmartSafeHub LuCI (future integration)
        ▼
 rpcd ucode object 'jarbis'
        │
-       ├─ read-only: status, devices_list  ─→ UCI configuration
+       ├─ read-only: status, devices_list, discovery_list ─→ UCI / tmpfs cache
        │
+       ├─ write: discovery_scan → jarbis-discover → DHCP + HTTP / MQTT retained
+       │                                   → /tmp/jarbis-discovery.records
        └─ write: light_set
                  └─ jarbis-control (input + UCI membership validation)
                          └─ mosquitto_pub
-                                └─ MQTT broker ── Tasmota light
+                                └─ Mosquitto (managed or external) ── Tasmota light
 ```
 
 ## API v1
 
 - `status {}` → `{ok:true, data:{apiVersion:1, version, enabled, mqttConfigured, features}, error:null}`
 - `devices_list {}` → `{ok:true, data:{devices:[{id,name,kind,protocol,enabled,capabilities}]},error:null}`
+- `discovery_scan {}` → `{ok:true, data:{devices:[{protocol,source,ip,mac,topic,name,registered:false}]}}` (bounded active scan; no registration)
+- `discovery_list {}` → last tmpfs cache (read-only)
 - `light_set {id,capability,value}` → `{ok:true,data:{accepted:true,id,capability,value},error:null}` (publish ACK, **not** lamp state)
 - Failure → `{ok:false,data:null,error:{code,message}}`
 - Capability: `power`: `ON|OFF`, `brightness`: decimal string `0..100`.
 
-Only manually registered `config device` entries with `kind=light,protocol=tasmota,enabled=1` can be controlled. The Tasmota standard FullTopic `%prefix%/%topic%/` is assumed; custom FullTopic is not supported yet.
+New managed Mosquitto is configured only after explicit Jarbis enable/start. No WAN/firewall rules; hashed credentials and client secrets are preserved. Existing custom Mosquitto UCI/listeners are not overwritten. Only manually registered `config device` entries with `kind=light,protocol=tasmota,enabled=1` can be controlled. The Tasmota standard FullTopic `%prefix%/%topic%/` is assumed; custom FullTopic is not supported yet.
 
 ## Forward-compatible model (design only, not implemented)
 

@@ -23,6 +23,8 @@ export function cursor() {
             if (config != 'jarbis') return null;
             if (section == 'main' && option == 'enabled') return '1';
             if (section == 'broker' && option == 'host') return '127.0.0.1';
+            if (section == 'broker' && option == 'mode') return 'managed';
+            if (section == 'discovery' && option == 'enabled') return '1';
             return null;
         },
         foreach: function(config, kind, callback) {
@@ -35,7 +37,7 @@ export function cursor() {
 };
 STUB
 cat > "$RUNNER" <<'UCRUN'
-import { status, devices_list, light_set } from './jarbis/core.uc';
+import { status, devices_list, light_set, discovery_list, discovery_scan } from './jarbis/core.uc';
 import { set_unavailable } from 'uci';
 let published = null;
 const mock_publish = function(argv, timeout) {
@@ -45,6 +47,16 @@ const mock_publish = function(argv, timeout) {
 const result = {
     status: status(),
     devices: devices_list(),
+    discovered: discovery_list(function(path, limit) {
+        return 'http|192.168.1.172|40:f5:20:cb:07:35|aiyato_cb0735|AiYaTo\n' +
+               'mqtt|192.168.1.172|40:f5:20:cb:07:35|aiyato_cb0735|AiYaTo\n' +
+               'mqtt|192.168.1.23|aa:bb:cc:dd:ee:ff|bad/topic|NotSafe\n';
+    }),
+    scan: discovery_scan({}, function(argv, timeout) {
+        if (timeout != 25000 || argv[0] != '/usr/libexec/jarbis-discover' || argv[1] != 'scan') return 1;
+        return 0;
+    }, function(path, limit) { return 'mqtt|192.168.1.172|40:f5:20:cb:07:35|aiyato_cb0735|AiYaTo\n'; }),
+    scanFailed: discovery_scan({}, function(argv, timeout) { return 1; }),
     on: light_set({ args: { id: 'living_room', capability: 'power', value: 'ON' } }, mock_publish),
     publish: published,
     brightness: light_set({ args: { id: 'living_room', capability: 'brightness', value: '90' } }, mock_publish),
@@ -92,12 +104,16 @@ def expect_error(name, code):
 status_data = success_data('status')
 require(status_data.get('enabled') is True, 'UCI enabled 조회')
 require(status_data.get('features', {}).get('ai') is False, 'AI 비활성 상태')
+require(status_data.get('features', {}).get('discovery') is True, '발견 지원')
+require(status_data.get('brokerMode') == 'managed', 'Broker 모드')
 devices_data = success_data('devices')
 devices = devices_data.get('devices')
 require(isinstance(devices, list) and len(devices) == 2, 'UCI 기기 목록 개수')
 require(devices[0].get('id') == 'living_room', 'UCI 기기 ID')
 require(devices[0].get('capabilities') == ['power', 'brightness'], '지원 capability')
 require('must-not-leak' not in json.dumps(r), 'UCI 비밀값 노출')
+require(len(success_data('discovered')['devices']) == 1, '중복 및 위험 기기 검색 결과 필터링')
+require(len(success_data('scan')['devices']) == 1, '검색 RPC 실행 및 결과 수신')
 require(success_data('on').get('accepted') is True, 'request.args 기반 전원 제어')
 success_data('brightness')
 published = r.get('publish')
@@ -108,7 +124,7 @@ expect_error('unavailableStatus', 'CONFIG_UNAVAILABLE')
 expect_error('unavailableDevices', 'CONFIG_UNAVAILABLE')
 for field, error in [('topLevelOnly','INVALID_DEVICE'), ('invalidDevice','INVALID_DEVICE'),
                      ('invalidCapability','INVALID_CAPABILITY'), ('invalidValue','INVALID_VALUE'),
-                     ('noArgs','INVALID_DEVICE'), ('publishFailed','PUBLISH_FAILED')]:
+                     ('noArgs','INVALID_DEVICE'), ('publishFailed','PUBLISH_FAILED'), ('scanFailed','DISCOVERY_FAILED')]:
     expect_error(field, error)
 PYTEST
 printf 'PASS: 실제 ucode RPC 요청 인자·UCI 기기 조회·MQTT 호출 결과 검증\n'

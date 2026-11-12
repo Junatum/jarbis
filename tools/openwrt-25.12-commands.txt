@@ -97,6 +97,11 @@ nft
 
 factoryreset
 
-# Required by Package/jarbis DEPENDS (+mosquitto-client-nossl).
+# Required by Package/jarbis DEPENDS (+mosquitto-client-ssl).
 # Not a BusyBox applet; keep this entry tied to the package dependency.
 mosquitto_pub
+
+# Managed Mosquitto and bounded Tasmota discovery dependencies.
+mosquitto_sub
+mosquitto_passwd
+rmdir
