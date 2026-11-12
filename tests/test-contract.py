@@ -28,7 +28,7 @@ class ProjectContracts(unittest.TestCase):
     def test_읽기와_쓰기_ACL은_분리하고_공개하지_않는다(self):
         acl = json.loads((ROOT / "root/usr/share/rpcd/acl.d/jarbis.json").read_text())
         self.assertEqual(acl['jarbis']['read']['ubus']['jarbis'], ['status', 'devices_list', 'discovery_list'])
-        self.assertEqual(acl['jarbis']['write']['ubus']['jarbis'], ['light_set', 'discovery_scan', 'settings_update', 'device_add', 'device_update', 'device_remove', 'broker_credentials'])
+        self.assertEqual(acl['jarbis']['write']['ubus']['jarbis'], ['light_set', 'discovery_scan', 'settings_update', 'device_add', 'device_update', 'device_remove', 'device_pair', 'broker_credentials'])
         self.assertNotIn('unauthenticated', json.dumps(acl))
 
     def test_기본값은_비활성화이며_인증된_관리형_MQTT를_선택한다(self):
@@ -132,7 +132,7 @@ class ProjectContracts(unittest.TestCase):
         config = (ROOT / '.shellspec').read_text()
         self.assertIn('--shell sh', config)
         spec = (ROOT / 'spec/contracts_spec.sh').read_text()
-        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh', 'test-openwrt-commands.sh', 'test-rpc-runtime.sh', 'test-package-contract.sh', 'test-rpcd-reconcile.sh', 'test-backup-restore.sh', 'test-changelog-spacing.sh', 'test-broker.sh', 'test-discovery.sh', 'test-manage.sh']:
+        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh', 'test-openwrt-commands.sh', 'test-rpc-runtime.sh', 'test-package-contract.sh', 'test-rpcd-reconcile.sh', 'test-backup-restore.sh', 'test-changelog-spacing.sh', 'test-broker.sh', 'test-discovery.sh', 'test-manage.sh', 'test-pair.sh']:
             self.assertIn('tests/' + name, spec)
         self.assertFalse((ROOT / 'tests/run.sh').exists())
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
@@ -144,6 +144,24 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn("'tests/run.sh'", coverage)
         self.assertIn("JARBIS_REQUIRE_UCODE: '1'", ci)
         self.assertIn('SHELLSPEC_VERSION: 0.28.1', ci)
+
+
+    def test_Tasmota_자동_연결은_승인과_인증정보_보호를_적용한다(self):
+        mk = (ROOT / 'Makefile').read_text()
+        cli = (ROOT / 'root/usr/libexec/jarbis-pair').read_text()
+        rpc = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
+        self.assertIn('PKG_RELEASE:=7', mk)
+        self.assertIn('./root/usr/libexec/jarbis-pair', mk)
+        self.assertIn('export function device_pair(', rpc)
+        self.assertIn("mkdtemp('/tmp/jarbis-pair-XXXXXX')", rpc)
+        self.assertIn("'wx', 0o600", rpc)
+        self.assertIn('device_pair', (ROOT / 'root/usr/share/rpcd/ucode/jarbis.uc').read_text())
+        self.assertIn('--post-file=', cli)
+        self.assertIn('BROKER_CONFLICT', cli)
+        self.assertIn('WEB_AUTH_REQUIRED', cli)
+        self.assertNotIn('eval ', cli)
+        self.assertNotIn('--post-data=', cli)
+        self.assertIn('tests/test-pair.sh', (ROOT / 'spec/contracts_spec.sh').read_text())
 
     def test_CI_상단에서_사전_검사를_실행한다(self):
         ci = (ROOT / '.github/workflows/ci.yml').read_text()

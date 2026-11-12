@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 'use strict';
 // Independent rpcd object: failures must never break SmartSafeHub login/status.
-import { status, devices_list, light_set, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials } from './jarbis/core.uc';
+import { status, devices_list, light_set, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials, device_pair } from './jarbis/core.uc';
 
 const methods = {
     status: { call: function(request) { return status(); } },
@@ -13,6 +13,8 @@ const methods = {
     device_update: { args: { id: '', name: '', enabled: false }, call: function(request) { return device_update(request); } },
     device_remove: { args: { id: '' }, call: function(request) { return device_remove(request); } },
     broker_credentials: { call: function(request) { return broker_credentials(); } },
+    device_pair: { args: { id: '', admin_password: '', replace_existing: false },
+        call: function(request) { return device_pair(request); } },
     light_set: {
         args: { id: '', capability: '', value: '' },
         call: function(request) { return light_set(request); },

@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=jarbis
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=6
+PKG_RELEASE:=7
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=SmartSafeHub Contributors
@@ -21,7 +21,7 @@ define Package/jarbis
 endef
 
 define Package/jarbis/description
- Lightweight Tasmota MQTT control with managed broker and on-demand discovery.
+ Lightweight Tasmota MQTT control with managed broker, discovery and approved pairing.
  Mosquitto is the only resident service; Jarbis has no polling daemon.
 endef
 
@@ -49,6 +49,7 @@ define Package/jarbis/install
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-broker $(1)/usr/libexec/jarbis-broker
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-manage $(1)/usr/libexec/jarbis-manage
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-discover $(1)/usr/libexec/jarbis-discover
+	$(INSTALL_BIN) ./root/usr/libexec/jarbis-pair $(1)/usr/libexec/jarbis-pair
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./root/etc/init.d/jarbis $(1)/etc/init.d/jarbis
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-rpcd-reconcile $(1)/usr/libexec/jarbis-rpcd-reconcile

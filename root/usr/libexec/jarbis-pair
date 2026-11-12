@@ -1,0 +1,150 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# User-approved Tasmota MQTT pairing. Secrets only travel through private files
+# and a local HTTP POST body, never through a process argument or a URL.
+set -eu
+umask 077
+UCI_BIN="${JARBIS_UCI_BIN:-uci}"
+FETCH_BIN="${JARBIS_FETCH_BIN:-uclient-fetch}"
+JSON_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
+SUB_BIN="${JARBIS_MQTT_SUB_BIN:-mosquitto_sub}"
+BROKER_BIN="${JARBIS_BROKER_BIN:-/usr/libexec/jarbis-broker}"
+SUB_CONFIG="${JARBIS_SUB_CONFIG:-/etc/jarbis/mosquitto_sub}"
+CREDENTIALS="${JARBIS_DEVICE_CREDENTIALS:-/etc/jarbis/device-credentials}"
+CACHE="${JARBIS_DISCOVERY_CACHE:-/tmp/jarbis-discovery.records}"
+get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
+fail() { printf '%s\n' "$1" > "$RESULT"; exit 1; }
+valid_id() { case "$1" in ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]*) return 1 ;; esac; [ "${#1}" -le 48 ]; }
+valid_topic() { case "$1" in ''|*[!a-zA-Z0-9_-]*|[-_]*) return 1 ;; esac; [ "${#1}" -le 96 ]; }
+valid_ip() {
+    case "$1" in ''|*[!0-9.]*|.*|*.|0.*|127.*|169.254.*|224.*|255.*) return 1 ;; esac
+    oldifs="$IFS"; IFS=.; set -- $1; IFS="$oldifs"
+    [ "$#" -eq 4 ] || return 1
+    for octet do
+        [ -n "$octet" ] && [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null || return 1
+    done
+}
+# The RPC creates this path via fs.mkdtemp(). Refuse any caller-selected path.
+[ "$#" -eq 1 ] || exit 1
+case "$1" in /tmp/jarbis-pair-??????) ;; *) exit 1 ;; esac
+DIR="$1"
+[ -d "$DIR" ] && [ ! -L "$DIR" ] && [ -f "$DIR/request" ] && [ ! -L "$DIR/request" ] || exit 1
+RESULT="$DIR/result"
+[ ! -e "$RESULT" ] || exit 1
+# The request is: UCI device ID, optional web admin password, overwrite consent.
+{
+    IFS= read -r DEVICE || exit 1
+    IFS= read -r WEB_PASSWORD || exit 1
+    IFS= read -r REPLACE || exit 1
+} < "$DIR/request"
+valid_id "$DEVICE" || fail INVALID_DEVICE
+[ "${#WEB_PASSWORD}" -le 64 ] || fail INVALID_PASSWORD
+# Only printable ASCII; CR/LF, shell-control characters and embedded NUL denied.
+[ "$(printf '%s' "$WEB_PASSWORD" | LC_ALL=C tr -cd ' -~')" = "$WEB_PASSWORD" ] || fail INVALID_PASSWORD
+case "$REPLACE" in 0|1) ;; *) fail INVALID_REQUEST ;; esac
+[ "$(get jarbis.main.enabled)" = 1 ] || fail DISABLED
+"$BROKER_BIN" check >/dev/null 2>&1 || fail BROKER_UNAVAILABLE
+[ "$(get jarbis.broker.mode)" = managed ] && [ "$(get jarbis.broker.managed_ready)" = 1 ] || fail BROKER_UNAVAILABLE
+[ "$(get "jarbis.$DEVICE")" = device ] && [ "$(get "jarbis.$DEVICE.enabled")" = 1 ] || fail INVALID_DEVICE
+[ "$(get "jarbis.$DEVICE.protocol")" = tasmota ] || fail INVALID_DEVICE
+TOPIC="$(get "jarbis.$DEVICE.topic")"
+valid_topic "$TOPIC" || fail INVALID_DEVICE
+LAN="$(get jarbis.broker.lan_ip)"
+case "$LAN" in */24) LAN="${LAN%/24}" ;; esac
+valid_ip "$LAN" || fail BROKER_UNAVAILABLE
+HOST="$(get jarbis.broker.host)"; PORT="$(get jarbis.broker.port)"
+[ -n "$HOST" ] && [ "$PORT" = 1883 ] || fail BROKER_UNAVAILABLE
+[ -f "$CREDENTIALS" ] && [ ! -L "$CREDENTIALS" ] || fail BROKER_UNAVAILABLE
+[ -f "$CACHE" ] && [ ! -L "$CACHE" ] || fail DEVICE_NOT_FOUND
+# Never scan the network; use only a recently-discovered HTTP Tasmota record.
+IP=''; MAC=''
+while IFS='|' read -r source ip mac topic name; do
+    if [ "$source" = http ] && [ "$topic" = "$TOPIC" ]; then IP="$ip"; MAC="$mac"; break; fi
+done < "$CACHE"
+valid_ip "$IP" || fail DEVICE_NOT_FOUND
+LAST="${IP##*.}"
+[ "$LAST" -ge 1 ] 2>/dev/null && [ "$LAST" -le 254 ] 2>/dev/null || fail UNSAFE_TARGET
+# Keep pairing on the /24 LAN already established by the discovery module.
+case "$IP" in "${LAN%.*}."*) ;; *) fail UNSAFE_TARGET ;; esac
+[ "$IP" != "$LAN" ] || fail UNSAFE_TARGET
+case "$MAC" in
+    [a-fA-F0-9][a-fA-F0-9]:[a-fA-F0-9][a-fA-F0-9]:[a-fA-F0-9][a-fA-F0-9]:[a-fA-F0-9][a-fA-F0-9]:[a-fA-F0-9][a-fA-F0-9]:[a-fA-F0-9][a-fA-F0-9]) ;;
+    *) fail DEVICE_NOT_FOUND ;;
+esac
+SUFFIX="$(printf '%s' "$MAC" | tr -d ':' | cut -c 7-12)"
+CLIENT="jarbis_$SUFFIX"
+[ "$CLIENT" != "$TOPIC" ] || fail INVALID_DEVICE
+# Read generated broker credentials, keep only the exact expected format.
+USER=''; SECRET=''
+{
+    IFS= read -r userline || :
+    IFS= read -r passline || :
+} < "$CREDENTIALS"
+[ "$userline" = username=jarbis ] || fail BROKER_UNAVAILABLE
+case "$passline" in password=*) SECRET="${passline#password=}" ;; *) fail BROKER_UNAVAILABLE ;; esac
+[ "${#SECRET}" -eq 64 ] && [ "$(printf '%s' "$SECRET" | tr -cd 'a-f0-9')" = "$SECRET" ] || fail BROKER_UNAVAILABLE
+[ -f "$CACHE" ] || fail DEVICE_NOT_FOUND
+command -v "$FETCH_BIN" >/dev/null 2>&1 || fail HTTP_UNAVAILABLE
+command -v "$JSON_BIN" >/dev/null 2>&1 || fail HTTP_UNAVAILABLE
+# Form encoding uses stdin, never awk -v with a secret value in argv.
+urlencode() {
+    printf '%s' "$1" | LC_ALL=C awk 'BEGIN { for (i=1;i<256;i++) h[sprintf("%c",i)]=sprintf("%%%02X",i) }
+        { for (i=1;i<=length($0);i++) { c=substr($0,i,1);
+          if (c ~ /^[A-Za-z0-9_.~-]$/) printf "%s", c; else printf "%s", h[c] } }'
+}
+http_command() {
+    command="$1"
+    { printf 'cmnd='; urlencode "$command";
+      if [ -n "$WEB_PASSWORD" ]; then printf '&user=admin&password='; urlencode "$WEB_PASSWORD"; fi
+    } > "$DIR/form"
+    # No HTTP proxy, no DNS, fixed IP and path. No URLs or secrets in argv.
+    "$FETCH_BIN" -q -Y off -T 3 --post-file="$DIR/form" -O "$DIR/response" "http://$IP/cm" 2>/dev/null || return 1
+    [ -s "$DIR/response" ] || return 1
+    [ "$(wc -c < "$DIR/response")" -le 8192 ] || return 1
+}
+# Authenticate and verify the model and identity before changing its settings.
+http_command 'Status 0' || fail HTTP_UNAVAILABLE
+DEVICE_TOPIC="$("$JSON_BIN" -i "$DIR/response" -e '@.Status.Topic' 2>/dev/null || :)"
+VERSION="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusFWR.Version' 2>/dev/null || :)"
+[ -n "$VERSION" ] || fail WEB_AUTH_REQUIRED
+[ "$DEVICE_TOPIC" = "$TOPIC" ] || fail DEVICE_MISMATCH
+REPORTED_MAC="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusNET.Mac' 2>/dev/null || :)"
+if [ -n "$REPORTED_MAC" ]; then
+    [ "$(printf '%s' "$REPORTED_MAC" | tr A-F a-f)" = "$(printf '%s' "$MAC" | tr A-F a-f)" ] || fail DEVICE_MISMATCH
+fi
+# Refuse to hijack a preconfigured third-party MQTT server without consent.
+OLD_HOST="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusMQT.MqttHost' 2>/dev/null || :)"
+OLD_PORT="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusMQT.MqttPort' 2>/dev/null || :)"
+OLD_USER="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusMQT.MqttUser' 2>/dev/null || :)"
+if [ -n "$OLD_HOST" ] && { [ "$OLD_HOST" != "$LAN" ] ||
+    [ "$OLD_PORT" != 1883 ] || [ "$OLD_USER" != jarbis ]; } && [ "$REPLACE" != 1 ]; then
+    fail BROKER_CONFLICT
+fi
+# Real Tasmota WebPassword auth failure returns HTML / login instead of Status JSON.
+# Differentiate for the user without disclosing either credential.
+BACKLOG="Backlog MqttPort 1883; MqttUser jarbis; MqttPassword $SECRET; MqttClient $CLIENT; Topic $TOPIC; FullTopic %prefix%/%topic%/; SetOption3 1; MqttHost $LAN"
+http_command "$BACKLOG" || fail HTTP_CONFIG_FAILED
+# Tasmota may restart the MQTT stack after Backlog. Verify the actual HTTP
+# settings instead of trusting an HTTP 200 response alone.
+sleep 2
+http_command 'Status 6' || fail CONNECTION_PENDING
+NEW_HOST="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusMQT.MqttHost' 2>/dev/null || :)"
+NEW_USER="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusMQT.MqttUser' 2>/dev/null || :)"
+NEW_CLIENT="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusMQT.MqttClient' 2>/dev/null || :)"
+NEW_PORT="$("$JSON_BIN" -i "$DIR/response" -e '@.StatusMQT.MqttPort' 2>/dev/null || :)"
+[ "$NEW_HOST" = "$LAN" ] && [ "$NEW_USER" = jarbis ] && [ "$NEW_CLIENT" = "$CLIENT" ] && [ "$NEW_PORT" = 1883 ] || fail CONNECTION_PENDING
+# LWT may be retained. Treat it as a positive signal only; the UI will still
+# distinguish a real paired online report from the HTTP settings themselves.
+if command -v "$SUB_BIN" >/dev/null 2>&1 && [ -s "$SUB_CONFIG" ]; then
+    # -W belongs to mosquitto_sub (not mosquitto_pub). If the installed sub
+    # does not support it, report CONFIGURED rather than using a blocking
+    # subscription or an unapproved external timeout utility.
+    if XDG_CONFIG_HOME=/etc/jarbis HOME=/etc/jarbis \
+        "$SUB_BIN" -h "$HOST" -p 1883 -W 3 -C 1 -t "tele/$TOPIC/LWT" > "$DIR/lwt" 2>/dev/null &&
+        grep -qx 'Online' "$DIR/lwt"; then
+        printf '%s\n' CONNECTED > "$RESULT"
+        exit 0
+    fi
+fi
+printf '%s\n' CONFIGURED > "$RESULT"
+exit 0

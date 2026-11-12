@@ -19,6 +19,7 @@
           "device_add",
           "device_update",
           "device_remove",
+          "device_pair",
           "broker_credentials"
         ]
       }

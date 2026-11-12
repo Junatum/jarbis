@@ -41,9 +41,13 @@ STUB
 # actual cache-missing fallback without reading any host filesystem state.
 cat > "$TMP/fs.uc" <<'STUB'
 export function readfile(path, limit) { return null; };
+export function mkdtemp(template) { return null; };
+export function open(path, mode, perm) { return null; };
+export function unlink(path) { return true; };
+export function rmdir(path) { return true; };
 STUB
 cat > "$RUNNER" <<'UCRUN'
-import { status, devices_list, light_set, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials } from './jarbis/core.uc';
+import { status, devices_list, light_set, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials, device_pair } from './jarbis/core.uc';
 import { set_unavailable } from 'uci';
 let published = null;
 const mock_publish = function(argv, timeout) {
@@ -61,6 +65,20 @@ const result = {
     update: device_update({ args: { id: 'living_room', name: 'Lamp', enabled: true } }, function(argv) { return argv[1] == 'device-update' ? 0 : 1; }),
     remove: device_remove({ args: { id: 'living_room' } }, function(argv) { return argv[1] == 'device-remove' ? 0 : 1; }),
     credsUnavailable: broker_credentials(function() { return null; }),
+    pairInvalid: device_pair({ args: { id: '../../unsafe' } }),
+    pairSuccess: device_pair({ args: { id: 'living_room', admin_password: 'admin&test', replace_existing: true } },
+      function(argv, timeout) {
+        if (argv[0] != '/usr/libexec/jarbis-pair' || timeout != 23000 || length(argv) != 2) return 1;
+        return 0;
+      }, {
+        mkdtemp: function(template) { return '/tmp/jarbis-pair-ABC123'; },
+        open: function(path, mode, perm) {
+            if (mode != 'wx' || perm != 0o600) return null;
+            return { write: function(data) { return length(data); }, close: function() { return true; } };
+        },
+        readfile: function(path, limit) { return 'CONNECTED\n'; },
+        unlink: function(path) { return true; }, rmdir: function(path) { return true; },
+      }),
     devices: devices_list(),
     discoveredMissing: discovery_list(),
     discovered: discovery_list(function(path, limit) {
@@ -133,6 +151,8 @@ require(len(success_data('discovered')['devices']) == 1, '중복 및 위험 기�
 require(len(success_data('scan')['devices']) == 1, '검색 RPC 실행 및 결과 수신')
 require(success_data('on').get('accepted') is True, 'request.args 기반 전원 제어')
 success_data('brightness')
+require(success_data('pairSuccess').get('mqttConfirmed') is True, 'Tasmota 자동 연결 RPC 확인')
+expect_error('pairInvalid', 'INVALID_DEVICE')
 for field in ('enabled','add','update','remove'): success_data(field)
 expect_error('invalidEnabled', 'INVALID_VALUE')
 for key, token in [('brokerLanError', 'LAN_UNAVAILABLE'), ('brokerUserError', 'MOSQUITTO_USER_MISSING')]:

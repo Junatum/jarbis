@@ -31,6 +31,10 @@ STUB
 # On the router, ucode-mod-fs supplies the real native implementation.
 cat > "$TMP/fs.uc" <<'STUB'
 export function readfile(path, limit) { return null; };
+export function mkdtemp(template) { return null; };
+export function open(path, mode, perm) { return null; };
+export function unlink(path) { return true; };
+export function rmdir(path) { return true; };
 STUB
 
 compile_entry() {

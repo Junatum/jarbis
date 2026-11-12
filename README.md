@@ -79,3 +79,26 @@ CI는 ShellSpec 및 ucode 설치에 앞서 `Verify all tests are included in CI`
 ## 개발 원칙
 
 Jarbis의 기기 타입/Capability → 상태 이벤트 → 규칙 엔진 → Action Executor는 내부 계약으로 분리합니다. 향후 `jarbis-ai` 모듈도 동일한 검증된 Action Executor를 사용해야 합니다. SafeShield 및 SmartSafeHub의 핵심 네트워크/로그인 RPC에는 Jarbis 코드를 추가하지 않습니다.
+
+## Tasmota 자동 연결 (0.1.0-r7)
+
+공유기 웹사이트에서 발견한 Tasmota 전구를 **기기 추가**한 뒤 **자동 연결**을 누르면
+`device_pair` RPC가 다음 동작을 수행합니다.
+
+1. DHCP/HTTP 검색 캐시에서 승인된 기기의 IP·Topic을 확인하고 HTTP `Status 0`으로 기기 정보를 다시 검증합니다.
+2. Jarbis 관리형 Broker의 내부 인증 파일을 이용해 Tasmota MQTT 설정을 HTTP POST로 전달합니다.
+3. `Status 6`으로 설정 반영을 확인하고 MQTT `LWT Online` 수신 여부를 추가 확인합니다.
+
+브라우저에 MQTT 비밀번호를 반환하지 않고, CLI 인자/HTTP URL/로그에도 넣지 않습니다.
+Tasmota 관리 화면에 비밀번호가 있으면 사용자 입력이 필요하며, 해당 값은 저장하지 않습니다.
+다른 MQTT Broker가 등록된 전구는 **기존 연결 변경 승인**이 있어야 변경됩니다.
+
+`device_pair` 호출 예시 (이미 등록된 기기):
+
+```sh
+ubus call jarbis device_pair '{"id":"tasmota_tasmota_CB0735","admin_password":"","replace_existing":false}'
+```
+
+실제 기기 ID는 `ubus call jarbis devices_list '{}'` 결과를 확인하세요.
+`mqttConfirmed: false`는 설정 반영은 확인했지만 MQTT 온라인 응답을 아직 검증하지 못했다는 의미입니다.
+HTTP 통신은 로컬 LAN에서 암호화되지 않으므로 신뢰할 수 있는 네트워크에서만 사용하세요.

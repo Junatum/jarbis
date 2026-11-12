@@ -90,6 +90,13 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The error should be blank
   End
 
+  It 'Tasmota 자동 연결과 자격 증명 보호 및 관리자 승인 절차를 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-pair.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
   It 'DHCP 및 Tasmota MQTT 자동 검색과 탐색 제한을 검증한다'
     When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-discovery.sh"
     The status should be success
