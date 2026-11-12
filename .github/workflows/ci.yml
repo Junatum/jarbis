@@ -43,7 +43,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential cmake libjson-c-dev pkg-config
           git clone https://github.com/jow-/ucode.git "$RUNNER_TEMP/ucode"
           git -C "$RUNNER_TEMP/ucode" checkout --detach "$UCODE_REF"
-          cmake -S "$RUNNER_TEMP/ucode" -B "$RUNNER_TEMP/ucode-build" -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=OFF -DULOOP_SUPPORT=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake -S "$RUNNER_TEMP/ucode" -B "$RUNNER_TEMP/ucode-build" -DCMAKE_C_FLAGS="-Wno-error=discarded-qualifiers" -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=OFF -DULOOP_SUPPORT=OFF -DCMAKE_BUILD_TYPE=Release
           cmake --build "$RUNNER_TEMP/ucode-build" --parallel
           echo "$RUNNER_TEMP/ucode-build" >> "$GITHUB_PATH"
 
