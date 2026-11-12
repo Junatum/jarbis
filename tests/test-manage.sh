@@ -30,21 +30,34 @@ MOCK
 cat > "$TMP/bin/broker" <<'MOCK'
 #!/bin/sh
 [ "$1" = start ] || exit 1
-[ "${BROKER_FAIL:-0}" = 0 ] || exit 1
+if [ "${BROKER_FAIL:-0}" != 0 ]; then
+    printf 'jarbis-broker: %s\n' "${BROKER_DETAIL:-LAN IPv4 unavailable (network.lan or network.interface.lan)}" >&2
+    exit 1
+fi
 printf '%s\n' start >> "$ACTIONS"
 MOCK
 chmod +x "$TMP/bin/"*
 export STATE="$TMP/state" COMMITS="$TMP/commits" ACTIONS="$TMP/actions"
 export JARBIS_UCI_BIN="$TMP/bin/uci" JARBIS_BROKER_BIN="$TMP/bin/broker"
 export JARBIS_DISCOVERY_CACHE="$TMP/discovery" JARBIS_MANAGE_LOCK="$TMP/lock"
+export JARBIS_MANAGE_ERROR_FILE="$TMP/manage.error"
 CLI="$ROOT/root/usr/libexec/jarbis-manage"
 printf 'managed\n' > "$STATE/jarbis.broker.mode"
 printf '0\n' > "$STATE/jarbis.main.enabled"
 BROKER_FAIL=1; export BROKER_FAIL
 if sh "$CLI" enabled 1 > /dev/null 2>&1; then fail 'Broker 오류인데 활성화됨'; fi
 [ "$(cat "$STATE/jarbis.main.enabled")" = 0 ] || fail '실패 시 enabled 변경됨'
+[ "$(cat "$JARBIS_MANAGE_ERROR_FILE")" = LAN_UNAVAILABLE ] || fail 'LAN 오류 코드가 기록되지 않음'
+BROKER_DETAIL='mosquitto user missing'; export BROKER_DETAIL
+if sh "$CLI" enabled 1 > /dev/null 2>&1; then fail 'Mosquitto 계정 누락을 무시함'; fi
+[ "$(cat "$JARBIS_MANAGE_ERROR_FILE")" = MOSQUITTO_USER_MISSING ] || fail '계정 오류 코드가 기록되지 않음'
+BROKER_DETAIL='existing file-based Mosquitto config; use external mode'; export BROKER_DETAIL
+if sh "$CLI" enabled 1 > /dev/null 2>&1; then fail '기존 설정 충돌을 무시함'; fi
+[ "$(cat "$JARBIS_MANAGE_ERROR_FILE")" = BROKER_CONFIG_CONFLICT ] || fail '설정 충돌 오류 코드가 기록되지 않음'
+unset BROKER_DETAIL
 BROKER_FAIL=0; export BROKER_FAIL
 sh "$CLI" enabled 1 || fail '활성화 실패'
+[ ! -e "$JARBIS_MANAGE_ERROR_FILE" ] || fail '성공 후 오류 메시지가 남아 있음'
 [ "$(cat "$STATE/jarbis.main.enabled")" = 1 ] || fail '활성화 상태 누락'
 [ "$(cat "$ACTIONS")" = start ] || fail 'Broker 시작 누락'
 sh "$CLI" enabled 0 || fail '비활성화 실패'

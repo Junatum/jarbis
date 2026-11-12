@@ -7,6 +7,25 @@ UCI_BIN="${JARBIS_UCI_BIN:-uci}"
 BROKER_BIN="${JARBIS_BROKER_BIN:-/usr/libexec/jarbis-broker}"
 CACHE="${JARBIS_DISCOVERY_CACHE:-/tmp/jarbis-discovery.records}"
 INIT="${JARBIS_INIT_BIN:-/etc/init.d/jarbis}"
+ERROR_FILE="${JARBIS_MANAGE_ERROR_FILE:-/tmp/jarbis-manage.error}"
+# Only known, non-secret failure codes are persisted. Never store broker stderr.
+record_error() {
+    tmp="$(mktemp "${ERROR_FILE}.XXXXXX")" || return 0
+    printf '%s\n' "$1" > "$tmp"
+    mv -f "$tmp" "$ERROR_FILE"
+}
+broker_error_code() {
+    case "$1" in
+        *'LAN IPv4 unavailable'*|*'invalid LAN IPv4'*) printf 'LAN_UNAVAILABLE' ;;
+        *'mosquitto user missing'*) printf 'MOSQUITTO_USER_MISSING' ;;
+        *'mosquitto_passwd missing'*) printf 'PASSWORD_TOOL_MISSING' ;;
+        *'existing file-based Mosquitto'*|*'existing UCI-managed Mosquitto'*|*'existing Mosquitto listener/bridge'*|*'custom per-listener auth'*|*'managed Mosquitto configuration changed'*) printf 'BROKER_CONFIG_CONFLICT' ;;
+        *'existing credentials'*|*'managed credentials missing'*) printf 'BROKER_CREDENTIALS_CONFLICT' ;;
+        *'password hashing failed'*|*'entropy unavailable'*) printf 'BROKER_CREDENTIALS_FAILED' ;;
+        *'Mosquitto service failed'*) printf 'BROKER_SERVICE_FAILED' ;;
+        *) printf 'BROKER_START_FAILED' ;;
+    esac
+}
 fail() { printf 'jarbis-manage: %s\n' "$1" >&2; exit 1; }
 get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
 valid_id() { case "$1" in ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]*) return 1 ;; esac; [ "${#1}" -le 48 ]; }
@@ -23,9 +42,22 @@ case "$1" in
     enabled)
         [ "$#" -eq 2 ] || fail 'invalid arguments'
         case "$2" in 0|1) ;; *) fail 'invalid enabled flag' ;; esac
+        # Clear stale diagnostic data, including on successful disable.
+        rm -f "$ERROR_FILE"
         if [ "$2" = 1 ]; then
             if [ "$(get jarbis.broker.mode)" = managed ]; then
-                "$BROKER_BIN" start || fail 'MQTT broker could not start'
+                # stdout/stderr is never sent to the web UI. Keep a bounded,
+                # private diagnostic buffer and map it to fixed error codes.
+                errlog="$(mktemp /tmp/jarbis-broker.XXXXXX)" || fail 'temporary log unavailable'
+                if "$BROKER_BIN" start > /dev/null 2> "$errlog"; then
+                    rm -f "$errlog"
+                else
+                    detail="$(head -c 2048 "$errlog")"
+                    rm -f "$errlog"
+                    code="$(broker_error_code "$detail")"
+                    record_error "$code"
+                    fail "MQTT broker could not start ($code)"
+                fi
             fi
         fi
         [ "$(get jarbis.main.enabled)" = "$2" ] || {

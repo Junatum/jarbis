@@ -9,10 +9,12 @@ PASSWD_BIN="${JARBIS_MOSQUITTO_PASSWD_BIN:-mosquitto_passwd}"
 SECRET_DIR="${JARBIS_SECRET_DIR:-/etc/jarbis}"
 BROKER_PASS="${JARBIS_BROKER_PASS:-/etc/mosquitto/jarbis.passwd}"
 MOSQUITTO_CONF="${JARBIS_MOSQUITTO_CONF:-/etc/mosquitto/mosquitto.conf}"
+UBUS_BIN="${JARBIS_UBUS_BIN:-ubus}"
+JSONFILTER_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
 fail() { printf 'jarbis-broker: %s\n' "$1" >&2; exit 1; }
 get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
-[ "$#" -eq 1 ] || fail 'usage: jarbis-broker setup|start|status|check'
-case "$1" in setup|start|status|check) action="$1" ;; *) fail 'invalid action' ;; esac
+[ "$#" -eq 1 ] || fail 'usage: jarbis-broker setup|start|status|check|diagnose'
+case "$1" in setup|start|status|check|diagnose) action="$1" ;; *) fail 'invalid action' ;; esac
 [ "$(get jarbis.broker.mode)" = managed ] || { [ "$action" = status ] && exit 0; fail 'broker is external'; }
 [ "${JARBIS_TEST_MODE:-}" = 1 ] || [ "$SECRET_DIR" = /etc/jarbis ] || fail 'invalid secret directory'
 [ "${JARBIS_TEST_MODE:-}" = 1 ] || [ "$BROKER_PASS" = /etc/mosquitto/jarbis.passwd ] || fail 'invalid password path'
@@ -55,30 +57,57 @@ else
         fail 'existing Mosquitto listener/bridge; use external mode'
     fi
 fi
+# Prefer the configured LAN address; for DHCP/managed LANs, read only the
+# logical network.interface.lan IPv4 address (never WAN or a full subnet scan).
+valid_lan_ipv4() {
+    candidate="$1"
+    case "$candidate" in ''|0.0.0.0|127.*|169.254.*|224.*|255.*|*[!0-9.]*|.*|*.) return 1 ;; esac
+    oldifs="$IFS"; IFS=.; set -- $candidate; IFS="$oldifs"
+    [ "$#" -eq 4 ] || return 1
+    for octet do
+        [ -n "$octet" ] && [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null || return 1
+    done
+}
 lan="$(get network.lan.ipaddr)"
-# Only support simple IPv4 static LAN binding. Avoid WAN/0.0.0.0 listeners.
-case "$lan" in ''|0.0.0.0|127.*|*[!0-9.]*|.*|*.) fail 'static LAN IPv4 required' ;; esac
-oldifs="$IFS"; IFS=.; set -- $lan; IFS="$oldifs"
-[ "$#" -eq 4 ] || fail 'invalid LAN IPv4'
-for octet do
-    [ -n "$octet" ] && [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null || fail 'invalid LAN IPv4'
-done
+if ! valid_lan_ipv4 "$lan"; then
+    lan="$("$UBUS_BIN" call network.interface.lan status 2>/dev/null | \
+        "$JSONFILTER_BIN" -e '@["ipv4-address"][0].address' 2>/dev/null || :)"
+fi
+valid_lan_ipv4 "$lan" || fail 'LAN IPv4 unavailable (network.lan or network.interface.lan)'
+# Validate the service account before writing any credentials or UCI settings.
+id mosquitto >/dev/null 2>&1 || fail 'mosquitto user missing'
+# The diagnostic action intentionally performs no service or UCI mutation.
+if [ "$action" = diagnose ]; then
+    printf 'PASS: managed broker preflight (LAN %s, user, configuration)\n' "$lan"
+    exit 0
+fi
+# Only a newly-created credential set may be rolled back on setup failure.
+# Never delete an existing managed password or rotate it on an upgrade.
+provisioning=0
+temp=''
+cleanup_partial() {
+    [ -z "$temp" ] || rm -f "$temp"
+    [ "$provisioning" = 1 ] || return 0
+    rm -f "$BROKER_PASS" "$SECRET_DIR/mosquitto_pub" \
+        "$SECRET_DIR/mosquitto_sub" "$SECRET_DIR/device-credentials"
+}
 # Credentials are provisioned once. Never rotate or overwrite on upgrades.
 if [ "$(get jarbis.broker.managed_ready)" != 1 ]; then
-    id mosquitto >/dev/null 2>&1 || fail 'mosquitto user missing'
     [ ! -e "$BROKER_PASS" ] && [ ! -e "$SECRET_DIR/device-credentials" ] && [ ! -e "$SECRET_DIR/mosquitto_pub" ] && [ ! -e "$SECRET_DIR/mosquitto_sub" ] || fail 'existing credentials; refusing overwrite'
+    provisioning=1
+    trap 'cleanup_partial' EXIT
+    trap 'exit 1' HUP INT TERM
     mkdir -p "$SECRET_DIR"
     chmod 700 "$SECRET_DIR"
     secret="$(dd if=/dev/urandom bs=32 count=1 2>/dev/null | sha256sum | cut -c 1-64)"
     [ "${#secret}" -eq 64 ] || fail 'entropy unavailable'
     temp="$(mktemp /tmp/jarbis-pass.XXXXXX)" || fail 'temporary file failure'
-    trap 'rm -f "$temp"' EXIT HUP INT TERM
     printf '%s:%s\n' 'jarbis' "$secret" > "$temp"
     # -U hashes plaintext inside a private /tmp file; password never appears in argv.
     "$PASSWD_BIN" -U "$temp" >/dev/null 2>&1 || fail 'password hashing failed'
     [ -s "$temp" ] || fail 'empty hashed password file'
     mv "$temp" "$BROKER_PASS"
-    trap - EXIT HUP INT TERM
+    temp=''
     chown mosquitto "$BROKER_PASS" || fail 'mosquitto user missing'
     chmod 600 "$BROKER_PASS"
     printf '%s\n' '-u jarbis' "-P $secret" > "$SECRET_DIR/mosquitto_pub"
@@ -111,10 +140,21 @@ set_if_changed mosquitto.jarbis_lan.port 1883
 set_if_changed mosquitto.jarbis_lan.bind_address "$lan"
 set_if_changed mosquitto.jarbis_lan.max_connections 16
 [ "$changed" = 0 ] || "$UCI_BIN" commit mosquitto
+# The LAN address also provides the Tasmota setup host when no static LAN
+# address is configured. Store only the address, never any credential.
+jarbis_changed=0
+if [ "$(get jarbis.broker.lan_ip)" != "$lan" ]; then
+    "$UCI_BIN" set "jarbis.broker.lan_ip=$lan"
+    jarbis_changed=1
+fi
 if [ "$(get jarbis.broker.managed_ready)" != 1 ]; then
     "$UCI_BIN" set jarbis.broker.managed_ready=1
-    "$UCI_BIN" commit jarbis
+    jarbis_changed=1
 fi
+[ "$jarbis_changed" = 0 ] || "$UCI_BIN" commit jarbis
+provisioning=0
+trap - EXIT HUP INT TERM
+if [ -n "$temp" ]; then rm -f "$temp"; fi
 if [ "$action" = start ]; then
     "$INIT" enable
     "$INIT" restart || fail 'Mosquitto service failed'

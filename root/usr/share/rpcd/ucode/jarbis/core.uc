@@ -31,7 +31,7 @@ export function status(checker) {
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',
-            brokerHost: cfg.get('jarbis', 'broker', 'mode') == 'managed' ? (cfg.get('network', 'lan', 'ipaddr') ?? '') : (cfg.get('jarbis', 'broker', 'host') ?? ''),
+            brokerHost: cfg.get('jarbis', 'broker', 'mode') == 'managed' ? (cfg.get('network', 'lan', 'ipaddr') ?? cfg.get('jarbis', 'broker', 'lan_ip') ?? '') : (cfg.get('jarbis', 'broker', 'host') ?? ''),
             brokerPort: cfg.get('jarbis', 'broker', 'port') ?? '1883',
             brokerReady: connected,
             features: { lightControl: true, discovery: true, mqttDiscovery: true, automation: false, ai: false },
@@ -173,11 +173,33 @@ function device_topic(topic) {
     return type(topic) == 'string' && match(topic, /^[A-Za-z0-9_-]{1,96}$/) != null;
 };
 
-export function settings_update(request, executor) {
+// Error codes are written by the privileged helper, never arbitrary stderr.
+// Display only fixed user-facing messages; no MQTT secret or configuration dump.
+function activation_error(reader) {
+    let code = '';
+    try {
+        code = (type(reader) == 'function' ? reader('/tmp/jarbis-manage.error', 64)
+            : readfile('/tmp/jarbis-manage.error', 64)) ?? '';
+    } catch (e) { return 'Jarbis 설정을 변경하지 못했습니다. MQTT 서비스 설정을 확인해 주세요.'; }
+    const messages = {
+        LAN_UNAVAILABLE: 'LAN_UNAVAILABLE: 공유기 LAN IPv4 주소를 찾지 못했습니다. network.lan 설정을 확인해 주세요.',
+        MOSQUITTO_USER_MISSING: 'MOSQUITTO_USER_MISSING: Mosquitto 시스템 계정이 없습니다. 설치된 패키지를 확인해 주세요.',
+        PASSWORD_TOOL_MISSING: 'PASSWORD_TOOL_MISSING: mosquitto_passwd 실행 파일이 없습니다.',
+        BROKER_CONFIG_CONFLICT: 'BROKER_CONFIG_CONFLICT: 기존 MQTT 설정을 보호하기 위해 시작을 중단했습니다. 외부 Broker 모드를 확인해 주세요.',
+        BROKER_CREDENTIALS_CONFLICT: 'BROKER_CREDENTIALS_CONFLICT: 이전 MQTT 인증 파일이 남아 있습니다. 파일을 삭제하지 말고 상태를 확인해 주세요.',
+        BROKER_CREDENTIALS_FAILED: 'BROKER_CREDENTIALS_FAILED: MQTT 인증 정보를 생성하지 못했습니다.',
+        BROKER_SERVICE_FAILED: 'BROKER_SERVICE_FAILED: Mosquitto 서비스가 시작되지 않았습니다. logread를 확인해 주세요.',
+        BROKER_START_FAILED: 'BROKER_START_FAILED: MQTT Broker 초기화에 실패했습니다. jarbis-broker diagnose 결과를 확인해 주세요.',
+    };
+    const key = trim(code);
+    return messages[key] ?? 'Jarbis 설정을 변경하지 못했습니다. MQTT 서비스 설정을 확인해 주세요.';
+};
+
+export function settings_update(request, executor, errorReader) {
     const enabled = request?.args?.enabled;
     if (type(enabled) != 'bool') return failure('INVALID_VALUE', '활성화 값이 올바르지 않습니다.');
     if (!managed_command(['enabled', enabled ? '1' : '0'], executor))
-        return failure('SETTINGS_FAILED', 'Jarbis 설정을 변경하지 못했습니다. MQTT 서비스 설정을 확인해 주세요.');
+        return failure('SETTINGS_FAILED', activation_error(errorReader));
     return success({ enabled: enabled });
 };
 
@@ -221,7 +243,7 @@ export function broker_credentials(reader) {
         const fields = split(content ?? '', '\n');
         if (fields[0] != 'username=jarbis' || match(fields[1] ?? '', /^password=[a-f0-9]{64}$/) == null)
             return failure('BROKER_UNAVAILABLE', 'MQTT 인증 정보를 읽지 못했습니다.');
-        return success({ host: cfg.get('network', 'lan', 'ipaddr') ?? '', port: '1883',
+        return success({ host: cfg.get('network', 'lan', 'ipaddr') ?? cfg.get('jarbis', 'broker', 'lan_ip') ?? '', port: '1883',
                          username: 'jarbis', secret: substr(fields[1], 9) });
     }
     catch (e) { return failure('BROKER_UNAVAILABLE', 'MQTT 인증 정보를 읽지 못했습니다.'); }

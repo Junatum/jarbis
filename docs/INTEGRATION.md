@@ -38,3 +38,24 @@ Tasmota MQTT 연결은 전구 관리 웹 UI에서 사용자가 직접 승인하�
 활성화를 거부하며, 이때 외부 Broker 모드를 사용해야 합니다.
 
 새 펌웨어 배포 전 `mosquitto_passwd` 제공 여부와 앱 복원 상태를 확인하세요.
+
+## MQTT Broker 초기화 진단 (0.1.0-r6 보강)
+
+공유기 웹사이트에서 Jarbis 활성화가 실패한 경우 기존 MQTT 설정을 삭제하거나
+`use_uci`를 강제로 변경하지 마세요. SSH에서 다음 **읽기 전용** 사전 점검을 실행합니다.
+
+```sh
+/usr/libexec/jarbis-broker diagnose
+```
+
+정상이라면 `PASS: managed broker preflight ...`가 출력됩니다. 오류가
+반환되면 LAN 주소, Mosquitto 시스템 계정, 기존 설정의 충돌을 구별할 수 있습니다.
+UCI에 정적 `network.lan.ipaddr`가 없는 경우에만 netifd의 논리적
+`network.interface.lan`에서 IPv4를 읽습니다. WAN 주소는 사용하지 않습니다.
+
+`Jarbis 켜기` 실패 시 RPC는 알려진 원인 코드와 한국어 안내를 전달합니다.
+`/tmp/jarbis-manage.error`에는 원인 코드만 기록되며, 실제 stderr나
+MQTT 비밀번호는 저장되지 않습니다. 성공하거나 비활성화하면 코드가 삭제됩니다.
+비밀번호 파일이 이미 있는 경우 사용자 데이터 보호를 위해 자동 덮어쓰기를
+하지 않습니다. 새 인증 정보 생성 중 실패한 경우에는 그 시도에서 생성한
+파일만 정리하며, 기존 인증 정보는 변경하지 않습니다.

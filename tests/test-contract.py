@@ -74,6 +74,19 @@ class ProjectContracts(unittest.TestCase):
         self.assertNotRegex(cli, r'(?m)^\s*stat\s')
         self.assertNotRegex(cli, r'(?m)^\s*(find|sort|head|tail)\s+/')
 
+    def test_브로커_사전_점검과_안전한_오류_전달(self):
+        broker = (ROOT / 'root/usr/libexec/jarbis-broker').read_text()
+        manager = (ROOT / 'root/usr/libexec/jarbis-manage').read_text()
+        rpc = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
+        self.assertIn('diagnose', broker)
+        self.assertIn('network.interface.lan', broker)
+        self.assertIn('valid_lan_ipv4', broker)
+        self.assertIn('broker_error_code()', manager)
+        self.assertIn('JARBIS_MANAGE_ERROR_FILE', manager)
+        self.assertIn('LAN_UNAVAILABLE', rpc)
+        self.assertIn('BROKER_CONFIG_CONFLICT', rpc)
+        self.assertNotIn('cat "$BROKER_PASS"', manager)
+
     def test_프론트엔드_빌드_산출물이_없다(self):
         self.assertFalse((ROOT / 'frontend').exists())
         for p in ROOT.rglob('*'):

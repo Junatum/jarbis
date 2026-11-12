@@ -54,6 +54,8 @@ const result = {
     status: status(function() { return 0; }),
     enabled: settings_update({ args: { enabled: true } }, function(argv) { return argv[1] == 'enabled' && argv[2] == '1' ? 0 : 1; }),
     invalidEnabled: settings_update({ args: { enabled: 'true' } }, function() { return 0; }),
+    brokerLanError: settings_update({ args: { enabled: true } }, function() { return 1; }, function() { return 'LAN_UNAVAILABLE\n'; }),
+    brokerUserError: settings_update({ args: { enabled: true } }, function() { return 1; }, function() { return 'MOSQUITTO_USER_MISSING\n'; }),
     add: device_add({ args: { id: 'tasmota_aiyato', name: 'AiYaTo Bulb', topic: 'aiyato_cb0735' } }, function(argv) { return argv[1] == 'device-add' ? 0 : 1; }),
     invalidAdd: device_add({ args: { id: '../../broken', name: 'bad', topic: 'home' } }, function() { return 0; }),
     update: device_update({ args: { id: 'living_room', name: 'Lamp', enabled: true } }, function(argv) { return argv[1] == 'device-update' ? 0 : 1; }),
@@ -133,6 +135,9 @@ require(success_data('on').get('accepted') is True, 'request.args 기반 전원 
 success_data('brightness')
 for field in ('enabled','add','update','remove'): success_data(field)
 expect_error('invalidEnabled', 'INVALID_VALUE')
+for key, token in [('brokerLanError', 'LAN_UNAVAILABLE'), ('brokerUserError', 'MOSQUITTO_USER_MISSING')]:
+    expect_error(key, 'SETTINGS_FAILED')
+    require(token in r[key]['error']['message'], f'{key}에 진단 코드 누락')
 expect_error('invalidAdd', 'INVALID_DEVICE')
 expect_error('credsUnavailable', 'BROKER_UNAVAILABLE')
 published = r.get('publish')
