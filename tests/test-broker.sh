@@ -76,7 +76,9 @@ if sh "$ROOT/root/usr/libexec/jarbis-broker" diagnose > "$TMP/diagnose" 2> "$TMP
 grep -q 'LAN IPv4 unavailable' "$TMP/error" || fail 'LAN IP 실패 원인 누락'
 [ ! -e "$TMP/secrets/device-credentials" ] || fail 'LAN IP 검증 실패 시 인증 생성'
 unset MOCK_NO_LAN
-printf '%s\n' 192.168.1.1 > "$STATE/network.lan.ipaddr"
+printf '%s\n' 192.168.1.1/24 > "$STATE/network.lan.ipaddr"
+sh "$ROOT/root/usr/libexec/jarbis-broker" diagnose > "$TMP/diagnose" || fail 'CIDR /24 주소 진단 실패'
+grep -q 'LAN 192.168.1.1,' "$TMP/diagnose" || fail 'CIDR /24 정규화 실패'
 # A failed password hash must not strand credentials and block retry.
 cat > "$TMP/bin/badpasswd" <<'MOCK'
 #!/bin/sh

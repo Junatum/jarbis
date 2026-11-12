@@ -36,7 +36,7 @@ make package/jarbis/compile V=s
 1. `uci set jarbis.main.enabled=1 && uci commit jarbis`로 기능을 켭니다. 이미 기기를 등록한 공유기에서는 기존 UCI를 덮어쓰지 않습니다. `0.1.0-r4`에서 업그레이드한 경우 `option mode`가 없으면 기존 외부 브로커로 계속 운영되므로, 관리형을 사용하고 싶다면 `uci set jarbis.broker.mode=managed && uci commit jarbis`를 명시적으로 실행하세요.
 2. `/etc/init.d/jarbis start`를 실행합니다. 이때 **최초 한 번만** 랜덤 비밀번호를 생성하고 `mosquitto_passwd -U`로 해시합니다. 기존 Mosquitto 리스너/설정이 있다면 실패하고 설정을 변경하지 않습니다. `status`는 준비 여부만 확인할 수 있습니다: `/usr/libexec/jarbis-broker status`.
 3. 기기의 MQTT 설정에서 Host를 **공유기 LAN IP**, Port `1883`, Username `jarbis`로 설정합니다. 인증 정보는 공유기 SSH에서 `cat /etc/jarbis/device-credentials`로 *관리자만* 확인하세요. 이 파일과 관련 파일은 공유기 루트 전용(0600)이며 웹 API에는 노출되지 않습니다. **자동 검색은 인증·설정 변경을 하지 않습니다.** 전구의 MQTT 설정은 이 단계에서 수동 입력합니다.
-4. 공유기에서 아래 읽기 전용 검색을 실행합니다. HTTP 검색은 DHCP 리스에 기록된 `/24` LAN 기기 **최대 8대**, Tasmota `Status 0` 응답을 대상으로 하며 각 요청은 2초 네트워크 타임아웃과 4KiB 응답 제한이 있습니다. MQTT 검색은 `tasmota/discovery/+/config`의 retained 메시지를 2초, 최대 32KiB까지만 수집합니다. 브로커와 HTTP를 함께 사용해 후보를 모읍니다.
+4. 공유기에서 아래 읽기 전용 검색을 실행합니다. HTTP 검색은 DHCP 임대 목록에 기록된 `/24` LAN 기기 **최대 16대**를 대상으로 합니다. `ipaddr=192.168.1.1/24` 형식도 인식하며 일반 HTTP 요청은 1초, Tasmota 이름으로 확인된 일부 후보는 최대 2초 타임아웃과 4KiB 응답 제한이 있습니다. Tasmota HTTP 응답의 `Status.Topic`과 `StatusFWR.Version`을 사용하며 버전 문자열에 `tasmota`라는 단어가 없는 제조사 빌드도 인식합니다. MQTT 검색은 `tasmota/discovery/+/config`의 retained 메시지를 2초, 최대 32KiB까지만 수집합니다. 브로커와 HTTP를 함께 사용해 후보를 모읍니다.
 
 ```sh
 ubus call jarbis status '{}'

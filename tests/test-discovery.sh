@@ -11,8 +11,8 @@ cat > "$TMP/bin/uci" <<'MOCK'
 [ "$1" = -q ] && [ "$2" = get ] || exit 1
 case "$3" in
  jarbis.main.enabled|jarbis.discovery.enabled) printf '1\n' ;;
- network.lan.ipaddr) printf '192.168.1.1\n' ;;
- network.lan.netmask) printf '%s\n' "${TEST_MASK:-255.255.255.0}" ;;
+ network.lan.ipaddr) printf '%s\n' "${TEST_LAN:-192.168.1.1}" ;;
+ network.lan.netmask) [ "${TEST_MASK:-255.255.255.0}" = missing ] || printf '%s\n' "${TEST_MASK:-255.255.255.0}" ;;
  jarbis.broker.host) printf '127.0.0.1\n' ;;
  jarbis.broker.port) printf '1883\n' ;;
  *) exit 1 ;;
@@ -22,7 +22,7 @@ cat > "$TMP/bin/uclient-fetch" <<'MOCK'
 #!/bin/sh
 printf '%s\n' "$*" >> "$HTTP_LOG"
 case "$*" in
- *192.168.1.172*) printf '%s\n' '{"Status":{"DeviceName":"AiYaTo"},"StatusFWR":{"Version":"14.3(tasmota)"},"StatusMQT":{"Topic":"aiyato_cb0735"}}' ;;
+ *192.168.1.172*) printf '%s\n' '{"Status":{"DeviceName":"AiYaTo-RGBCW","Topic":"tasmota_CB0735"},"StatusFWR":{"Version":"16.0.0(release-zbbridge)"},"StatusMQT":{"MqttHost":"192.168.1.1"}}' ;;
  *) printf '%s\n' '{"StatusFWR":{"Version":"unknown"}}' ;;
 esac
 MOCK
@@ -32,9 +32,9 @@ case "$1" in
 -i)
     grep -q 'AiYaTo' "$2" || exit 1
     case "$4" in
-        @.StatusFWR.Version) printf '14.3(tasmota)\n' ;;
-        @.StatusMQT.Topic) printf 'aiyato_cb0735\n' ;;
-        @.Status.DeviceName) printf 'AiYaTo\n' ;;
+        @.StatusFWR.Version) printf '16.0.0(release-zbbridge)\n' ;;
+        @.Status.Topic) printf 'tasmota_CB0735\n' ;;
+        @.Status.DeviceName) printf 'AiYaTo-RGBCW\n' ;;
     esac ;;
 -s)
     case "$2" in
@@ -77,12 +77,27 @@ export HTTP_LOG="$TMP/http-log" JARBIS_TEST_MODE=1 JARBIS_UCI_BIN="$TMP/bin/uci"
 PATH="$TMP/bin:$PATH"; export PATH
 sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail '자동 검색 실패'
 [ "$(wc -l < "$TMP/http-log")" -eq 16 ] || fail 'HTTP 요청 수 제한 위반'
-grep -Fx 'http|192.168.1.172|40:f5:20:cb:07:35|aiyato_cb0735|AiYaTo' "$TMP/cache" >/dev/null || fail 'HTTP Tasmota 식별 실패'
+grep -Fx 'http|192.168.1.172|40:f5:20:cb:07:35|tasmota_CB0735|AiYaTo-RGBCW' "$TMP/cache" >/dev/null || fail 'HTTP Tasmota 식별 실패'
 grep -Fx 'mqtt|192.168.1.172|40:F5:20:CB:07:35|aiyato_cb0735|AiYaTo' "$TMP/cache" >/dev/null || fail 'MQTT retained discovery 실패'
 ! grep -F 'wrongtopic' "$TMP/cache" >/dev/null || fail '비표준 FullTopic 허용'
 ! grep -F 'unsafe/topic' "$TMP/cache" >/dev/null || fail '위험한 topic 허용'
-TEST_MASK=255.255.0.0; export TEST_MASK
+# Real field report: OpenWrt stores a /24 CIDR in ipaddr and omits netmask;
+# Tasmota version is 'release-zbbridge', not a string containing 'tasmota'.
+TEST_LAN=192.168.1.1/24 TEST_MASK=missing; export TEST_LAN TEST_MASK
+: > "$TMP/http-log"
+sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail 'CIDR /24 주소에서 자동 검색 실패'
+grep -Fx 'http|192.168.1.172|40:f5:20:cb:07:35|tasmota_CB0735|AiYaTo-RGBCW' "$TMP/cache" >/dev/null || fail '실기기 응답 형식을 식별하지 못함'
+[ "$(wc -l < "$TMP/http-log")" -eq 16 ] || fail 'CIDR 검색에서 HTTP 개수 제한 위반'
+TEST_LAN=192.168.1.1/16
+: > "$TMP/http-log"
+sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail '비지원 CIDR에서 안전 검색 실패'
+[ ! -s "$TMP/http-log" ] || fail '/16 네트워크에서 자동 HTTP 검색 수행'
+TEST_LAN=192.168.1.1 TEST_MASK=missing
+: > "$TMP/http-log"
+sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail '마스크 없는 비CIDR 네트워크에서 안전 검색 실패'
+[ ! -s "$TMP/http-log" ] || fail '마스크 없는 주소에서 무단 HTTP 검색 수행'
+TEST_LAN=192.168.1.1 TEST_MASK=255.255.0.0
 : > "$TMP/http-log"
 sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail '비지원 네트워크에서 안전 검색 실패'
 [ ! -s "$TMP/http-log" ] || fail '/24 아닌 LAN에서 자동 HTTP 검색 수행'
-printf 'PASS: DHCP /24 후보 16대 제한·Tasmota HTTP·MQTT Discovery 및 비정상 payload 필터\n'
+printf 'PASS: CIDR /24·실제 Tasmota 16 응답·16대 후보 제한·MQTT Discovery 검증\n'

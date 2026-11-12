@@ -69,6 +69,9 @@ valid_lan_ipv4() {
     done
 }
 lan="$(get network.lan.ipaddr)"
+# OpenWrt may store the prefix directly in ipaddr (e.g. 192.168.1.1/24).
+# Bind to the host address, never to the literal CIDR string.
+case "$lan" in */24) lan="${lan%/24}" ;; esac
 if ! valid_lan_ipv4 "$lan"; then
     lan="$("$UBUS_BIN" call network.interface.lan status 2>/dev/null | \
         "$JSONFILTER_BIN" -e '@["ipv4-address"][0].address' 2>/dev/null || :)"

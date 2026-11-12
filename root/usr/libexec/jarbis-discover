@@ -29,11 +29,37 @@ mkdir "$LOCK" 2>/dev/null || fail 'scan already running'
 TMP="$(mktemp -d /tmp/jarbis-scan.XXXXXX)" || { rmdir "$LOCK"; fail 'temp directory'; }
 trap 'rm -rf "$TMP"; rmdir "$LOCK"' EXIT HUP INT TERM
 : > "$TMP/results"
-# /24 LAN default only: if netmask differs, skip HTTP instead of probing outside LAN.
+# Limit HTTP candidates to the configured /24 LAN. OpenWrt accepts both
+# `192.168.1.1/24` and `ipaddr=192.168.1.1` + `netmask=255.255.255.0`.
+# A missing dotted netmask is valid ONLY when the address explicitly has /24.
 lan="$(get network.lan.ipaddr)"
 mask="$(get network.lan.netmask)"
-case "$lan" in *.*.*.*) prefix="${lan%.*}." ;; *) prefix='' ;; esac
-[ "$mask" = 255.255.255.0 ] || prefix=''
+subnet24=0
+case "$lan" in
+    */24)
+        lan="${lan%/24}"
+        case "$mask" in ''|255.255.255.0) subnet24=1 ;; esac
+        ;;
+    */*) : ;;
+    *) [ "$mask" = 255.255.255.0 ] && subnet24=1 ;;
+esac
+prefix=''
+if [ "$subnet24" = 1 ]; then
+    case "$lan" in
+        ''|*[!0-9.]*|.*|*.) : ;;
+        *)
+            oldifs="$IFS"; IFS=.; set -- $lan; IFS="$oldifs"
+            if [ "$#" -eq 4 ]; then
+                valid=1
+                for octet do
+                    [ -n "$octet" ] && [ "$octet" -ge 0 ] 2>/dev/null &&
+                        [ "$octet" -le 255 ] 2>/dev/null || valid=0
+                done
+                [ "$valid" = 1 ] && prefix="${lan%.*}."
+            fi
+            ;;
+    esac
+fi
 count=0
 if [ -n "$prefix" ] && [ -f "$LEASES" ]; then
     # Up to 16 candidate HTTP requests at 1s each, staying inside the 25s RPC budget.
@@ -44,12 +70,25 @@ if [ -n "$prefix" ] && [ -f "$LEASES" ]; then
         case "$last" in ''|*[!0-9]*) continue ;; esac
         [ "$last" -ge 1 ] 2>/dev/null && [ "$last" -le 254 ] 2>/dev/null || continue
         count=$((count + 1))
-        if "$FETCH_BIN" -q -T 1 -O - "http://$ip/cm?cmnd=Status%200" 2>/dev/null | head -c 4096 > "$TMP/http"; then
+        # Prioritize identified Tasmota DHCP names with a slightly longer
+        # timeout while keeping a strict bound across at most 16 candidates.
+        timeout=1
+        case "$hostname" in
+            tasmota-*|Tasmota-*)
+                if [ "${tasmota_slow:-0}" -lt 4 ]; then
+                    timeout=2
+                    tasmota_slow=$((${tasmota_slow:-0} + 1))
+                fi
+                ;;
+        esac
+        if "$FETCH_BIN" -q -T "$timeout" -O - "http://$ip/cm?cmnd=Status%200" 2>/dev/null | head -c 4096 > "$TMP/http"; then
             version="$(jsonfilter -i "$TMP/http" -e '@.StatusFWR.Version' 2>/dev/null || :)"
-            topic="$(jsonfilter -i "$TMP/http" -e '@.StatusMQT.Topic' 2>/dev/null || :)"
+            # Tasmota Status 0 contains the MQTT topic under Status.Topic;
+            # do not rely on the firmware version containing 'tasmota'.
+            topic="$(jsonfilter -i "$TMP/http" -e '@.Status.Topic' 2>/dev/null || :)"
             name="$(jsonfilter -i "$TMP/http" -e '@.Status.DeviceName' 2>/dev/null || :)"
-            case "$version" in *tasmota*|*Tasmota*) ;; *) continue ;; esac
-            case "$topic" in ''|*[!a-zA-Z0-9_-]*|[-_]*) topic='' ;; esac
+            [ -n "$version" ] && [ -n "$topic" ] || continue
+            case "$topic" in ''|*[!a-zA-Z0-9_-]*|[-_]*) continue ;; esac
             case "$mac" in *[!a-fA-F0-9:]*|'') mac='' ;; esac
             # Data is untrusted. Only safe ASCII is placed in the line protocol.
             name="$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9 _-' | cut -c 1-48)"

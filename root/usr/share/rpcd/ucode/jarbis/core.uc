@@ -31,7 +31,7 @@ export function status(checker) {
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',
-            brokerHost: cfg.get('jarbis', 'broker', 'mode') == 'managed' ? (cfg.get('network', 'lan', 'ipaddr') ?? cfg.get('jarbis', 'broker', 'lan_ip') ?? '') : (cfg.get('jarbis', 'broker', 'host') ?? ''),
+            brokerHost: cfg.get('jarbis', 'broker', 'mode') == 'managed' ? (cfg.get('jarbis', 'broker', 'lan_ip') ?? cfg.get('network', 'lan', 'ipaddr') ?? '') : (cfg.get('jarbis', 'broker', 'host') ?? ''),
             brokerPort: cfg.get('jarbis', 'broker', 'port') ?? '1883',
             brokerReady: connected,
             features: { lightControl: true, discovery: true, mqttDiscovery: true, automation: false, ai: false },
@@ -243,7 +243,7 @@ export function broker_credentials(reader) {
         const fields = split(content ?? '', '\n');
         if (fields[0] != 'username=jarbis' || match(fields[1] ?? '', /^password=[a-f0-9]{64}$/) == null)
             return failure('BROKER_UNAVAILABLE', 'MQTT 인증 정보를 읽지 못했습니다.');
-        return success({ host: cfg.get('network', 'lan', 'ipaddr') ?? cfg.get('jarbis', 'broker', 'lan_ip') ?? '', port: '1883',
+        return success({ host: cfg.get('jarbis', 'broker', 'lan_ip') ?? cfg.get('network', 'lan', 'ipaddr') ?? '', port: '1883',
                          username: 'jarbis', secret: substr(fields[1], 9) });
     }
     catch (e) { return failure('BROKER_UNAVAILABLE', 'MQTT 인증 정보를 읽지 못했습니다.'); }

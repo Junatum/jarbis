@@ -87,6 +87,17 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn('BROKER_CONFIG_CONFLICT', rpc)
         self.assertNotIn('cat "$BROKER_PASS"', manager)
 
+    def test_Tasmota_실기기_CIDR와_표준_Status_Topic을_검색한다(self):
+        discover = (ROOT / 'root/usr/libexec/jarbis-discover').read_text()
+        broker = (ROOT / 'root/usr/libexec/jarbis-broker').read_text()
+        rpc = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
+        self.assertIn('*/24)', discover)
+        self.assertIn("'@.Status.Topic'", discover)
+        self.assertNotIn("'@.StatusMQT.Topic'", discover)
+        self.assertNotIn('*tasmota*|*Tasmota*', discover)
+        self.assertIn('*/24) lan="${lan%/24}"', broker)
+        self.assertIn("cfg.get('jarbis', 'broker', 'lan_ip') ?? cfg.get('network', 'lan', 'ipaddr')", rpc)
+
     def test_프론트엔드_빌드_산출물이_없다(self):
         self.assertFalse((ROOT / 'frontend').exists())
         for p in ROOT.rglob('*'):
