@@ -14,7 +14,12 @@
       "ubus": {
         "jarbis": [
           "light_set",
-          "discovery_scan"
+          "discovery_scan",
+          "settings_update",
+          "device_add",
+          "device_update",
+          "device_remove",
+          "broker_credentials"
         ]
       }
     }

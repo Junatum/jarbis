@@ -22,12 +22,13 @@ class ProjectContracts(unittest.TestCase):
         self.assertRegex(notes, r'(?m)^## \[' + re.escape(release) + r'\] - \d{4}-\d{2}-\d{2}$')
         self.assertIn(f"version: '{release}'", (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text())
         self.assertIn('PKG_LICENSE:=GPL-3.0-or-later', mk)
+        self.assertIn('./root/usr/libexec/jarbis-manage', mk)
         self.assertTrue((ROOT / 'LICENSE').is_file())
 
     def test_읽기와_쓰기_ACL은_분리하고_공개하지_않는다(self):
         acl = json.loads((ROOT / "root/usr/share/rpcd/acl.d/jarbis.json").read_text())
         self.assertEqual(acl['jarbis']['read']['ubus']['jarbis'], ['status', 'devices_list', 'discovery_list'])
-        self.assertEqual(acl['jarbis']['write']['ubus']['jarbis'], ['light_set', 'discovery_scan'])
+        self.assertEqual(acl['jarbis']['write']['ubus']['jarbis'], ['light_set', 'discovery_scan', 'settings_update', 'device_add', 'device_update', 'device_remove', 'broker_credentials'])
         self.assertNotIn('unauthenticated', json.dumps(acl))
 
     def test_기본값은_비활성화이며_인증된_관리형_MQTT를_선택한다(self):
@@ -100,7 +101,7 @@ class ProjectContracts(unittest.TestCase):
         config = (ROOT / '.shellspec').read_text()
         self.assertIn('--shell sh', config)
         spec = (ROOT / 'spec/contracts_spec.sh').read_text()
-        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh', 'test-openwrt-commands.sh', 'test-rpc-runtime.sh', 'test-package-contract.sh', 'test-rpcd-reconcile.sh', 'test-backup-restore.sh', 'test-changelog-spacing.sh', 'test-broker.sh', 'test-discovery.sh']:
+        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh', 'test-openwrt-commands.sh', 'test-rpc-runtime.sh', 'test-package-contract.sh', 'test-rpcd-reconcile.sh', 'test-backup-restore.sh', 'test-changelog-spacing.sh', 'test-broker.sh', 'test-discovery.sh', 'test-manage.sh']:
             self.assertIn('tests/' + name, spec)
         self.assertFalse((ROOT / 'tests/run.sh').exists())
         ci = (ROOT / '.github/workflows/ci.yml').read_text()

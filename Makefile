@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=jarbis
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=SmartSafeHub Contributors
@@ -47,6 +47,7 @@ define Package/jarbis/install
 	$(INSTALL_DIR) $(1)/usr/libexec
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-control $(1)/usr/libexec/jarbis-control
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-broker $(1)/usr/libexec/jarbis-broker
+	$(INSTALL_BIN) ./root/usr/libexec/jarbis-manage $(1)/usr/libexec/jarbis-manage
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-discover $(1)/usr/libexec/jarbis-discover
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./root/etc/init.d/jarbis $(1)/etc/init.d/jarbis

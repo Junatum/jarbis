@@ -8,13 +8,27 @@ INIT="${JARBIS_MOSQUITTO_INIT:-/etc/init.d/mosquitto}"
 PASSWD_BIN="${JARBIS_MOSQUITTO_PASSWD_BIN:-mosquitto_passwd}"
 SECRET_DIR="${JARBIS_SECRET_DIR:-/etc/jarbis}"
 BROKER_PASS="${JARBIS_BROKER_PASS:-/etc/mosquitto/jarbis.passwd}"
+MOSQUITTO_CONF="${JARBIS_MOSQUITTO_CONF:-/etc/mosquitto/mosquitto.conf}"
 fail() { printf 'jarbis-broker: %s\n' "$1" >&2; exit 1; }
 get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
-[ "$#" -eq 1 ] || fail 'usage: jarbis-broker setup|start|status'
-case "$1" in setup|start|status) action="$1" ;; *) fail 'invalid action' ;; esac
+[ "$#" -eq 1 ] || fail 'usage: jarbis-broker setup|start|status|check'
+case "$1" in setup|start|status|check) action="$1" ;; *) fail 'invalid action' ;; esac
 [ "$(get jarbis.broker.mode)" = managed ] || { [ "$action" = status ] && exit 0; fail 'broker is external'; }
 [ "${JARBIS_TEST_MODE:-}" = 1 ] || [ "$SECRET_DIR" = /etc/jarbis ] || fail 'invalid secret directory'
 [ "${JARBIS_TEST_MODE:-}" = 1 ] || [ "$BROKER_PASS" = /etc/mosquitto/jarbis.passwd ] || fail 'invalid password path'
+if [ "$action" = check ]; then
+    [ "$(get jarbis.main.enabled)" = 1 ] || fail 'Jarbis disabled'
+    host="$(get jarbis.broker.host)"; port="$(get jarbis.broker.port)"
+    case "$host" in ''|-*|*[!a-zA-Z0-9.:_-]*) fail 'invalid host' ;; esac
+    case "$port" in ''|*[!0-9]*) fail 'invalid port' ;; esac
+    [ "$port" -ge 1 ] 2>/dev/null && [ "$port" -le 65535 ] 2>/dev/null || fail 'invalid port'
+    if [ "$(get jarbis.broker.mode)" = managed ]; then
+        [ "$(get jarbis.broker.managed_ready)" = 1 ] && [ -s "$SECRET_DIR/mosquitto_pub" ] || fail 'broker not ready'
+    fi
+    XDG_CONFIG_HOME="$SECRET_DIR" HOME="$SECRET_DIR" \
+        mosquitto_pub -h "$host" -p "$port" -W 2 -q 0 -t 'jarbis/healthcheck' -m 'ready' >/dev/null 2>&1 || fail 'MQTT connection failed'
+    exit 0
+fi
 if [ "$action" = status ]; then
     [ "$(get jarbis.broker.managed_ready)" = 1 ] && [ -s "$BROKER_PASS" ] && [ -s "$SECRET_DIR/device-credentials" ]
     exit $?
@@ -31,6 +45,12 @@ if [ "$(get jarbis.broker.managed_ready)" = 1 ]; then
 else
     [ "$(get mosquitto.owrt.use_uci)" != 1 ] || fail 'existing UCI-managed Mosquitto; use external mode'
     [ "$(get mosquitto.mosquitto.per_listener_settings)" != 1 ] || fail 'custom per-listener auth; use external mode'
+    # UCI migration must not discard an active file-based Mosquitto config.
+    # Stock commented sample is safe; configured directives require external mode.
+    if [ -f "$MOSQUITTO_CONF" ] &&
+        grep -Eq '^[[:space:]]*[^#[:space:]]' "$MOSQUITTO_CONF"; then
+        fail 'existing file-based Mosquitto config; use external mode'
+    fi
     if "$UCI_BIN" -q show mosquitto 2>/dev/null | grep -Eq '=listener|=bridge'; then
         fail 'existing Mosquitto listener/bridge; use external mode'
     fi

@@ -15,16 +15,25 @@ function config_cursor() {
     catch (e) { return null; }
 };
 
-export function status() {
+export function status(checker) {
     const cfg = config_cursor();
     if (!cfg) return failure('CONFIG_UNAVAILABLE', 'Jarbis 설정을 읽지 못했습니다.');
     try {
+        let connected = false;
+        if (cfg.get('jarbis', 'main', 'enabled') == '1') {
+            try {
+                connected = (type(checker) == 'function' ? checker() : system(['/usr/libexec/jarbis-broker', 'check'], 3500)) == 0;
+            } catch (e) { connected = false; }
+        }
         return success({
             apiVersion: 1,
-            version: '0.1.0-r5',
+            version: '0.1.0-r6',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',
+            brokerHost: cfg.get('jarbis', 'broker', 'mode') == 'managed' ? (cfg.get('network', 'lan', 'ipaddr') ?? '') : (cfg.get('jarbis', 'broker', 'host') ?? ''),
+            brokerPort: cfg.get('jarbis', 'broker', 'port') ?? '1883',
+            brokerReady: connected,
             features: { lightControl: true, discovery: true, mqttDiscovery: true, automation: false, ai: false },
         });
     }
@@ -45,6 +54,7 @@ export function devices_list() {
                 name: dev.name ?? id,
                 kind: dev.kind ?? '',
                 protocol: dev.protocol ?? '',
+                topic: dev.topic ?? '',
                 enabled: dev.enabled == '1',
                 capabilities: dev.kind == 'light' && dev.protocol == 'tasmota'
                     ? ['power', 'brightness'] : [],
@@ -141,4 +151,78 @@ export function discovery_scan(request, scanner, reader) {
         return discovery_list(reader);
     }
     catch (e) { return failure('DISCOVERY_FAILED', '기기 검색을 완료하지 못했습니다.'); }
+};
+
+// All mutations use a narrow privileged CLI. Never accept a UCI path, raw MQTT
+// command, arbitrary destination or shell fragment from an ubus caller.
+function managed_command(args, executor) {
+    const command = ['/usr/libexec/jarbis-manage'];
+    for (let part in args) push(command, part);
+    try {
+        return (type(executor) == 'function' ? executor(command, 10000) : system(command, 10000)) == 0;
+    }
+    catch (e) { return false; }
+};
+function device_id(id) {
+    return type(id) == 'string' && match(id, /^[A-Za-z_][A-Za-z0-9_]{0,47}$/) != null;
+};
+function device_name(name) {
+    return type(name) == 'string' && match(name, /^[A-Za-z0-9 _-]{1,48}$/) != null;
+};
+function device_topic(topic) {
+    return type(topic) == 'string' && match(topic, /^[A-Za-z0-9_-]{1,96}$/) != null;
+};
+
+export function settings_update(request, executor) {
+    const enabled = request?.args?.enabled;
+    if (type(enabled) != 'bool') return failure('INVALID_VALUE', '활성화 값이 올바르지 않습니다.');
+    if (!managed_command(['enabled', enabled ? '1' : '0'], executor))
+        return failure('SETTINGS_FAILED', 'Jarbis 설정을 변경하지 못했습니다. MQTT 서비스 설정을 확인해 주세요.');
+    return success({ enabled: enabled });
+};
+
+export function device_add(request, executor) {
+    const args = request?.args ?? {};
+    if (!device_id(args.id) || !device_name(args.name) || !device_topic(args.topic))
+        return failure('INVALID_DEVICE', '기기 이름, ID 또는 MQTT Topic을 확인해 주세요.');
+    if (!managed_command(['device-add', args.id, args.name, args.topic], executor))
+        return failure('DEVICE_ADD_FAILED', '발견한 기기를 등록하지 못했습니다. 다시 검색해 주세요.');
+    return success({ id: args.id, added: true });
+};
+
+export function device_update(request, executor) {
+    const args = request?.args ?? {};
+    if (!device_id(args.id) || !device_name(args.name) || type(args.enabled) != 'bool')
+        return failure('INVALID_DEVICE', '수정할 기기 정보를 확인해 주세요.');
+    if (!managed_command(['device-update', args.id, args.name, args.enabled ? '1' : '0'], executor))
+        return failure('DEVICE_UPDATE_FAILED', '기기 설정을 변경하지 못했습니다.');
+    return success({ id: args.id, updated: true });
+};
+
+export function device_remove(request, executor) {
+    const id = request?.args?.id;
+    if (!device_id(id)) return failure('INVALID_DEVICE', '기기 ID가 올바르지 않습니다.');
+    if (!managed_command(['device-remove', id], executor))
+        return failure('DEVICE_REMOVE_FAILED', '기기를 삭제하지 못했습니다.');
+    return success({ id: id, removed: true });
+};
+
+// Explicit opt-in secret display; excluded from status/devices/discovery.
+// UI must never log or persist this response. Only used for local pairing.
+export function broker_credentials(reader) {
+    const cfg = config_cursor();
+    if (!cfg) return failure('CONFIG_UNAVAILABLE', '설정을 읽지 못했습니다.');
+    if (cfg.get('jarbis', 'broker', 'mode') != 'managed' ||
+        cfg.get('jarbis', 'broker', 'managed_ready') != '1')
+        return failure('BROKER_UNAVAILABLE', '관리형 MQTT Broker가 준비되지 않았습니다.');
+    try {
+        const content = type(reader) == 'function' ? reader('/etc/jarbis/device-credentials', 512)
+            : readfile('/etc/jarbis/device-credentials', 512);
+        const fields = split(content ?? '', '\n');
+        if (fields[0] != 'username=jarbis' || match(fields[1] ?? '', /^password=[a-f0-9]{64}$/) == null)
+            return failure('BROKER_UNAVAILABLE', 'MQTT 인증 정보를 읽지 못했습니다.');
+        return success({ host: cfg.get('network', 'lan', 'ipaddr') ?? '', port: '1883',
+                         username: 'jarbis', secret: substr(fields[1], 9) });
+    }
+    catch (e) { return failure('BROKER_UNAVAILABLE', 'MQTT 인증 정보를 읽지 못했습니다.'); }
 };

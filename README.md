@@ -4,7 +4,7 @@
 
 SmartSafeHub의 경량 로컬 홈 자동화 엔진입니다. *Iron Man*의 J.A.R.V.I.S.를 패러디한 이름으로, Marvel 공식 제품과 관련이 없습니다. 영문 풀이는 사용자 프로젝트의 원래 표현을 그대로 유지합니다.
 
-- **버전:** 0.1.0-r5 (인증된 내장 MQTT Broker 및 Tasmota 자동 검색)
+- **버전:** 0.1.0-r6 (MQTT Broker 관리 및 스마트홈 웹 연동 RPC)
 - **라이선스:** GPL-3.0-or-later
 - **대상:** OpenWrt 25.12 / SmartSafeHub (기본 기능에 대한 하드웨어별 실기 검증 필요)
 - **런타임:** BusyBox ash, UCI, rpcd-ucode, Mosquitto Broker/Client, uclient-fetch, jsonfilter. Python/Node.js/AI 런타임 불필요. MQTT Broker는 procd로 관리됩니다.

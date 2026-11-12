@@ -83,6 +83,13 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The error should be blank
   End
 
+  It '승인된 장치 등록과 설정 변경을 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-manage.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
   It 'DHCP 및 Tasmota MQTT 자동 검색과 탐색 제한을 검증한다'
     When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-discovery.sh"
     The status should be success

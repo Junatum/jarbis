@@ -37,6 +37,7 @@ printf '%s\n' "$1" >> "$SERVICE_LOG"
 MOCK
 chmod 700 "$TMP/bin/"*
 export PATH="$TMP/bin:$PATH" STATE="$TMP/state" SERVICE_LOG="$TMP/actions" COMMIT_LOG="$TMP/commits"
+export JARBIS_MOSQUITTO_CONF="$TMP/mosquitto/mosquitto.conf"
 export JARBIS_UCI_BIN="$TMP/bin/uci" JARBIS_MOSQUITTO_INIT="$TMP/bin/service"
 export JARBIS_MOSQUITTO_PASSWD_BIN="$TMP/bin/mosquitto_passwd" JARBIS_SECRET_DIR="$TMP/secrets" JARBIS_BROKER_PASS="$TMP/mosquitto/jarbis.passwd" JARBIS_TEST_MODE=1
 printf '%s\n' managed > "$STATE/jarbis.broker.mode"
@@ -68,6 +69,9 @@ CUSTOM=1; export CUSTOM
 if sh "$ROOT/root/usr/libexec/jarbis-broker" setup > "$TMP/out" 2>/dev/null; then fail '기존 리스너를 덮어씀'; fi
 [ ! -e "$TMP/secrets/device-credentials" ] || fail '기존 리스너에 자격증명을 추가함'
 unset CUSTOM
+printf 'listener 1883\n' > "$JARBIS_MOSQUITTO_CONF"
+if sh "$ROOT/root/usr/libexec/jarbis-broker" setup > "$TMP/out" 2>/dev/null; then fail '기존 파일 기반 Mosquitto 설정을 덮어씀'; fi
+printf '# commented sample only\n' > "$JARBIS_MOSQUITTO_CONF"
 printf '%s\n' 1 > "$STATE/mosquitto.owrt.use_uci"
 if sh "$ROOT/root/usr/libexec/jarbis-broker" setup > "$TMP/out" 2>/dev/null; then fail '기존 UCI 브로커를 덮어씀'; fi
 printf 'PASS: 인증된 로컬 브로커 생성·재기동·자격 증명 보존·기존 Mosquitto 설정 보호\n'

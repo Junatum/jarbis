@@ -43,7 +43,7 @@ cat > "$TMP/fs.uc" <<'STUB'
 export function readfile(path, limit) { return null; };
 STUB
 cat > "$RUNNER" <<'UCRUN'
-import { status, devices_list, light_set, discovery_list, discovery_scan } from './jarbis/core.uc';
+import { status, devices_list, light_set, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials } from './jarbis/core.uc';
 import { set_unavailable } from 'uci';
 let published = null;
 const mock_publish = function(argv, timeout) {
@@ -51,7 +51,14 @@ const mock_publish = function(argv, timeout) {
     return 0;
 };
 const result = {
-    status: status(),
+    status: status(function() { return 0; }),
+    enabled: settings_update({ args: { enabled: true } }, function(argv) { return argv[1] == 'enabled' && argv[2] == '1' ? 0 : 1; }),
+    invalidEnabled: settings_update({ args: { enabled: 'true' } }, function() { return 0; }),
+    add: device_add({ args: { id: 'tasmota_aiyato', name: 'AiYaTo Bulb', topic: 'aiyato_cb0735' } }, function(argv) { return argv[1] == 'device-add' ? 0 : 1; }),
+    invalidAdd: device_add({ args: { id: '../../broken', name: 'bad', topic: 'home' } }, function() { return 0; }),
+    update: device_update({ args: { id: 'living_room', name: 'Lamp', enabled: true } }, function(argv) { return argv[1] == 'device-update' ? 0 : 1; }),
+    remove: device_remove({ args: { id: 'living_room' } }, function(argv) { return argv[1] == 'device-remove' ? 0 : 1; }),
+    credsUnavailable: broker_credentials(function() { return null; }),
     devices: devices_list(),
     discoveredMissing: discovery_list(),
     discovered: discovery_list(function(path, limit) {
@@ -124,6 +131,10 @@ require(len(success_data('discovered')['devices']) == 1, '중복 및 위험 기�
 require(len(success_data('scan')['devices']) == 1, '검색 RPC 실행 및 결과 수신')
 require(success_data('on').get('accepted') is True, 'request.args 기반 전원 제어')
 success_data('brightness')
+for field in ('enabled','add','update','remove'): success_data(field)
+expect_error('invalidEnabled', 'INVALID_VALUE')
+expect_error('invalidAdd', 'INVALID_DEVICE')
+expect_error('credsUnavailable', 'BROKER_UNAVAILABLE')
 published = r.get('publish')
 require(isinstance(published, dict), '실제 MQTT 발행 호출 누락')
 require(published.get('argv') == ['/usr/libexec/jarbis-control', 'light-set', 'living_room', 'power', 'ON'], '실제 발행 인수')

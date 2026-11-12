@@ -14,8 +14,14 @@ fail() { printf 'jarbis-discover: %s\n' "$1" >&2; exit 1; }
 [ "$#" -eq 1 ] && [ "$1" = scan ] || fail 'usage: jarbis-discover scan'
 [ "$(get jarbis.main.enabled)" = 1 ] || fail 'Jarbis disabled'
 [ "$(get jarbis.discovery.enabled)" = 1 ] || fail 'discovery disabled'
+# Respect dnsmasq's configured lease path (do not scan all LAN addresses).
+if [ -z "${JARBIS_LEASES+x}" ]; then
+    configured_leases="$(get 'dhcp.@dnsmasq[0].leasefile')"
+    [ -z "$configured_leases" ] || LEASES="$configured_leases"
+fi
 if [ "${JARBIS_TEST_MODE:-}" != 1 ]; then
-    [ "$LEASES" = /tmp/dhcp.leases ] && [ "$CACHE" = /tmp/jarbis-discovery.records ] || fail 'unsafe discovery path'
+    case "$LEASES" in /tmp/*) ;; *) fail 'unsafe discovery path' ;; esac
+    [ ! -L "$LEASES" ] && [ "$CACHE" = /tmp/jarbis-discovery.records ] || fail 'unsafe discovery path'
 fi
 # Lock without flock dependency (on-demand RPC calls may overlap).
 LOCK="${CACHE}.lock"
@@ -30,15 +36,15 @@ case "$lan" in *.*.*.*) prefix="${lan%.*}." ;; *) prefix='' ;; esac
 [ "$mask" = 255.255.255.0 ] || prefix=''
 count=0
 if [ -n "$prefix" ] && [ -f "$LEASES" ]; then
-    # Max 8 candidate HTTP requests, 2s timeout each, max 4KiB response.
+    # Up to 16 candidate HTTP requests at 1s each, staying inside the 25s RPC budget.
     while read -r expiration mac ip hostname clientid; do
-        [ "$count" -lt 8 ] || break
+        [ "$count" -lt 16 ] || break
         case "$ip" in "$prefix"*) ;; *) continue ;; esac
         last="${ip#"$prefix"}"
         case "$last" in ''|*[!0-9]*) continue ;; esac
         [ "$last" -ge 1 ] 2>/dev/null && [ "$last" -le 254 ] 2>/dev/null || continue
         count=$((count + 1))
-        if "$FETCH_BIN" -q -T 2 -O - "http://$ip/cm?cmnd=Status%200" 2>/dev/null | head -c 4096 > "$TMP/http"; then
+        if "$FETCH_BIN" -q -T 1 -O - "http://$ip/cm?cmnd=Status%200" 2>/dev/null | head -c 4096 > "$TMP/http"; then
             version="$(jsonfilter -i "$TMP/http" -e '@.StatusFWR.Version' 2>/dev/null || :)"
             topic="$(jsonfilter -i "$TMP/http" -e '@.StatusMQT.Topic' 2>/dev/null || :)"
             name="$(jsonfilter -i "$TMP/http" -e '@.Status.DeviceName' 2>/dev/null || :)"

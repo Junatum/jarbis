@@ -68,15 +68,15 @@ MOCK
 chmod 700 "$TMP/bin/"*
 printf '%s\n' '-u jarbis' '-P test-only' > "$TMP/auth/mosquitto_sub"
 chmod 600 "$TMP/auth/mosquitto_sub"
-# 10 candidates; bounded to the first 8 valid /24 lease addresses.
-for n in 172 175 176 177 178 179 180 181 182 183; do
+# 18 candidates; bounded to the first 16 valid /24 lease addresses.
+for n in 172 175 176 177 178 179 180 181 182 183 184 185 186 187 188 189 190 191; do
     printf '0 40:f5:20:cb:07:35 192.168.1.%s host *\n' "$n"
 done > "$TMP/leases"
 printf '0 aa:bb:cc:dd:ee:ff 10.0.0.4 bad *\n' >> "$TMP/leases"
 export HTTP_LOG="$TMP/http-log" JARBIS_TEST_MODE=1 JARBIS_UCI_BIN="$TMP/bin/uci" JARBIS_FETCH_BIN="$TMP/bin/uclient-fetch" JARBIS_MQTT_SUB_BIN="$TMP/bin/mosquitto_sub" JARBIS_LEASES="$TMP/leases" JARBIS_DISCOVERY_CACHE="$TMP/cache" JARBIS_MQTT_CONFIG_DIR="$TMP/auth"
 PATH="$TMP/bin:$PATH"; export PATH
 sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail '자동 검색 실패'
-[ "$(wc -l < "$TMP/http-log")" -eq 8 ] || fail 'HTTP 요청 수 제한 위반'
+[ "$(wc -l < "$TMP/http-log")" -eq 16 ] || fail 'HTTP 요청 수 제한 위반'
 grep -Fx 'http|192.168.1.172|40:f5:20:cb:07:35|aiyato_cb0735|AiYaTo' "$TMP/cache" >/dev/null || fail 'HTTP Tasmota 식별 실패'
 grep -Fx 'mqtt|192.168.1.172|40:F5:20:CB:07:35|aiyato_cb0735|AiYaTo' "$TMP/cache" >/dev/null || fail 'MQTT retained discovery 실패'
 ! grep -F 'wrongtopic' "$TMP/cache" >/dev/null || fail '비표준 FullTopic 허용'
@@ -85,4 +85,4 @@ TEST_MASK=255.255.0.0; export TEST_MASK
 : > "$TMP/http-log"
 sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail '비지원 네트워크에서 안전 검색 실패'
 [ ! -s "$TMP/http-log" ] || fail '/24 아닌 LAN에서 자동 HTTP 검색 수행'
-printf 'PASS: DHCP /24 후보 제한·Tasmota HTTP·MQTT Discovery 및 비정상 payload 필터\n'
+printf 'PASS: DHCP /24 후보 16대 제한·Tasmota HTTP·MQTT Discovery 및 비정상 payload 필터\n'
