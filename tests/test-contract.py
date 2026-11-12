@@ -98,6 +98,13 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn('*/24) lan="${lan%/24}"', broker)
         self.assertIn("cfg.get('jarbis', 'broker', 'lan_ip') ?? cfg.get('network', 'lan', 'ipaddr')", rpc)
 
+    def test_MQTT_브로커_확인은_지원되는_Publisher_옵션을_사용한다(self):
+        broker = (ROOT / 'root/usr/libexec/jarbis-broker').read_text()
+        self.assertIn('MQTT_PUB_BIN', broker)
+        self.assertIn('"$MQTT_PUB_BIN" -h "$host" -p "$port" -q 1', broker)
+        self.assertNotRegex(broker, r'(?m)^\s*mosquitto_pub\s+.*\s-W\s')
+        self.assertIn("fail 'MQTT connection failed'", broker)
+
     def test_프론트엔드_빌드_산출물이_없다(self):
         self.assertFalse((ROOT / 'frontend').exists())
         for p in ROOT.rglob('*'):

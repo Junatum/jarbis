@@ -95,6 +95,33 @@ sh "$ROOT/root/usr/libexec/jarbis-broker" start || fail '브로커 최초 설정
 [ "$(cat "$STATE/mosquitto.jarbis_local.bind_address")" = 127.0.0.1 ] || fail 'loopback 바인딩 오류'
 [ "$(cat "$STATE/mosquitto.mosquitto.allow_anonymous")" = 0 ] || fail '익명 접속 차단 실패'
 [ "$(cat "$STATE/jarbis.broker.managed_ready")" = 1 ] || fail '준비 마커 없음'
+# The router's mosquitto_pub rejects -W (sub-only option). A broker health
+# check must use supported publisher options and confirm the MQTT publish.
+cat > "$TMP/bin/mosquitto_pub" <<'MOCK'
+#!/bin/sh
+for arg do
+    [ "$arg" != -W ] || exit 2
+    [ "$arg" != --wait ] || exit 2
+done
+[ "$XDG_CONFIG_HOME" = "$JARBIS_SECRET_DIR" ] || exit 3
+[ "$HOME" = "$JARBIS_SECRET_DIR" ] || exit 3
+[ -s "$XDG_CONFIG_HOME/mosquitto_pub" ] || exit 3
+printf '%s\n' "$*" > "$MOCK_PUBLISH_LOG"
+[ "${MOCK_PUB_FAIL:-0}" = 0 ] || exit 4
+MOCK
+chmod 700 "$TMP/bin/mosquitto_pub"
+export JARBIS_MQTT_PUB_BIN="$TMP/bin/mosquitto_pub" MOCK_PUBLISH_LOG="$TMP/pubargs"
+printf '%s\n' 1 > "$STATE/jarbis.main.enabled"
+printf '%s\n' 127.0.0.1 > "$STATE/jarbis.broker.host"
+printf '%s\n' 1883 > "$STATE/jarbis.broker.port"
+sh "$ROOT/root/usr/libexec/jarbis-broker" check || fail '지원되는 MQTT 게시 옵션으로 연결 확인 실패'
+grep -F -- '-h 127.0.0.1 -p 1883 -q 1 -t jarbis/healthcheck -m ready' "$TMP/pubargs" >/dev/null || fail 'MQTT 연결 검사 인자 오류'
+MOCK_PUB_FAIL=1; export MOCK_PUB_FAIL
+if sh "$ROOT/root/usr/libexec/jarbis-broker" check > "$TMP/out" 2> "$TMP/error"; then
+    fail '실패한 MQTT 발행을 연결 성공으로 처리함'
+fi
+grep -F 'MQTT connection failed' "$TMP/error" >/dev/null || fail 'MQTT 연결 실패 메시지 누락'
+unset MOCK_PUB_FAIL
 [ "$(cat "$TMP/actions")" = "$(printf 'enable\nrestart')" ] || fail '서비스 실행 실패'
 [ "$(LC_ALL=C ls -ld "$TMP/secrets/device-credentials" | cut -c 1-10)" = '-rw-------' ] || fail '인증파일 권한 오류'
 grep -F 'jarbis:$7$sha512$' "$TMP/mosquitto/jarbis.passwd" >/dev/null || fail '해시 파일 아님'

@@ -6,6 +6,7 @@ umask 077
 UCI_BIN="${JARBIS_UCI_BIN:-uci}"
 INIT="${JARBIS_MOSQUITTO_INIT:-/etc/init.d/mosquitto}"
 PASSWD_BIN="${JARBIS_MOSQUITTO_PASSWD_BIN:-mosquitto_passwd}"
+MQTT_PUB_BIN="${JARBIS_MQTT_PUB_BIN:-mosquitto_pub}"
 SECRET_DIR="${JARBIS_SECRET_DIR:-/etc/jarbis}"
 BROKER_PASS="${JARBIS_BROKER_PASS:-/etc/mosquitto/jarbis.passwd}"
 MOSQUITTO_CONF="${JARBIS_MOSQUITTO_CONF:-/etc/mosquitto/mosquitto.conf}"
@@ -27,8 +28,14 @@ if [ "$action" = check ]; then
     if [ "$(get jarbis.broker.mode)" = managed ]; then
         [ "$(get jarbis.broker.managed_ready)" = 1 ] && [ -s "$SECRET_DIR/mosquitto_pub" ] || fail 'broker not ready'
     fi
+    command -v "$MQTT_PUB_BIN" >/dev/null 2>&1 || fail 'mosquitto_pub missing'
+    # mosquitto_pub does not provide mosquitto_sub's -W wait option on the
+    # OpenWrt client build. QoS 1 waits for a broker acknowledgement instead.
+    # The managed credentials are loaded from a private client config file;
+    # never expose passwords in argv or print the client configuration.
     XDG_CONFIG_HOME="$SECRET_DIR" HOME="$SECRET_DIR" \
-        mosquitto_pub -h "$host" -p "$port" -W 2 -q 0 -t 'jarbis/healthcheck' -m 'ready' >/dev/null 2>&1 || fail 'MQTT connection failed'
+        "$MQTT_PUB_BIN" -h "$host" -p "$port" -q 1 \
+        -t 'jarbis/healthcheck' -m 'ready' >/dev/null 2>&1 || fail 'MQTT connection failed'
     exit 0
 fi
 if [ "$action" = status ]; then
