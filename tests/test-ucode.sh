@@ -8,6 +8,12 @@ ENTRY="$MOD/jarbis.uc"
     echo 'FAIL: ucode RPC 소스 누락' >&2
     exit 1
 }
+# This is a parser compatibility contract, not a stylistic restriction:
+# `finally` is not an ucode keyword and prevents rpcd registration.
+if grep -nE '(^|[^A-Za-z0-9_])finally[[:space:]]*\{' "$MOD/jarbis/core.uc" 2>/dev/null; then
+    echo 'FAIL: ucode는 finally 구문을 지원하지 않습니다.' >&2
+    exit 1
+fi
 if ! command -v ucode >/dev/null 2>&1; then
     if [ "${JARBIS_REQUIRE_UCODE:-0}" = 1 ]; then
         echo 'FAIL: CI에서 ucode 컴파일러는 필수입니다.' >&2

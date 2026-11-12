@@ -54,6 +54,7 @@ const mock_publish = function(argv, timeout) {
     published = { argv: argv, timeout: timeout };
     return 0;
 };
+let pair_cleanup = [];
 const result = {
     status: status(function() { return 0; }),
     enabled: settings_update({ args: { enabled: true } }, function(argv) { return argv[1] == 'enabled' && argv[2] == '1' ? 0 : 1; }),
@@ -79,6 +80,15 @@ const result = {
         readfile: function(path, limit) { return 'CONNECTED\n'; },
         unlink: function(path) { return true; }, rmdir: function(path) { return true; },
       }),
+    pairFailureCleanup: device_pair({ args: { id: 'living_room', admin_password: 'private' } },
+      function(argv) { return 1; }, {
+        mkdtemp: function() { return '/tmp/jarbis-pair-MOCK22'; },
+        open: function() { return { write: function(data) { return length(data); }, close: function() { return true; } }; },
+        readfile: function(path) { return 'BROKER_UNAVAILABLE\n'; },
+        unlink: function(path) { push(pair_cleanup, path); return true; },
+        rmdir: function(path) { push(pair_cleanup, path); return true; },
+      }),
+    pairCleanup: pair_cleanup,
     devices: devices_list(),
     discoveredMissing: discovery_list(),
     discovered: discovery_list(function(path, limit) {
@@ -153,6 +163,9 @@ require(success_data('on').get('accepted') is True, 'request.args 기반 전원 
 success_data('brightness')
 require(success_data('pairSuccess').get('mqttConfirmed') is True, 'Tasmota 자동 연결 RPC 확인')
 expect_error('pairInvalid', 'INVALID_DEVICE')
+expect_error('pairFailureCleanup', 'BROKER_UNAVAILABLE')
+require(len(r.get('pairCleanup', [])) == 6, '실패 시 모든 임시 인증 파일과 디렉터리 정리')
+require(not any('private' in str(path) for path in r['pairCleanup']), '임시 경로에 비밀번호 누출 없음')
 for field in ('enabled','add','update','remove'): success_data(field)
 expect_error('invalidEnabled', 'INVALID_VALUE')
 for key, token in [('brokerLanError', 'LAN_UNAVAILABLE'), ('brokerUserError', 'MOSQUITTO_USER_MISSING')]:

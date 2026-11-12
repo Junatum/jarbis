@@ -250,9 +250,40 @@ export function broker_credentials(reader) {
 };
 
 
-// Approved pairing only. No secrets in ubus responses, command arguments,
-// diagnostic files or UCI. The temporary directory and request file are
-// created with private permissions, then unlinked on every exit path.
+// Approved pairing only. The secret stays in a root-private temporary request
+// file and is never exposed in command arguments or ubus responses.
+// ucode supports try/catch but not JavaScript's finally statement: keep the
+// actual pairing call separate so every return path reaches the cleanup below.
+function pair_in_directory(io, path, id, password, replace, executor) {
+    const handle = io.open(path + '/request', 'wx', 0o600);
+    if (!handle) return failure('PAIR_UNAVAILABLE', '연결 요청 파일을 만들지 못했습니다.');
+    const payload = id + '\n' + password + '\n' + (replace ? '1' : '0') + '\n';
+    const written = handle.write(payload);
+    const closed = handle.close();
+    if (written != length(payload) || !closed)
+        return failure('PAIR_UNAVAILABLE', '연결 요청을 안전하게 저장하지 못했습니다.');
+    const command = ['/usr/libexec/jarbis-pair', path];
+    const rc = type(executor) == 'function' ? executor(command, 23000) : system(command, 23000);
+    const result = trim(io.readfile(path + '/result', 64) ?? '');
+    if (rc == 0 && (result == 'CONNECTED' || result == 'CONFIGURED'))
+        return success({ id: id, configured: true, mqttConfirmed: result == 'CONNECTED' });
+    const messages = {
+        WEB_AUTH_REQUIRED: '전구 관리자 인증이 필요합니다. 비밀번호를 입력해 주세요.',
+        BROKER_CONFLICT: '전구가 다른 MQTT Broker에 설정되어 있습니다. 기존 연결 변경을 승인해야 합니다.',
+        DEVICE_NOT_FOUND: 'HTTP로 발견된 전구가 없습니다. 다시 검색해 주세요.',
+        DEVICE_MISMATCH: '전구의 Topic 또는 응답이 검색 기록과 일치하지 않습니다.',
+        BROKER_UNAVAILABLE: '내장 MQTT Broker가 준비되지 않았습니다.',
+        CONNECTION_PENDING: '전구 설정 후 연결 확인이 완료되지 않았습니다. 잠시 후 다시 확인해 주세요.',
+        HTTP_UNAVAILABLE: '전구 관리 API에 접근하지 못했습니다.',
+        HTTP_CONFIG_FAILED: '전구에 MQTT 설정을 전달하지 못했습니다.',
+        UNSAFE_TARGET: '다른 네트워크로의 연결 요청을 차단했습니다.',
+        INVALID_PASSWORD: '관리자 비밀번호 형식이 올바르지 않습니다.',
+        INVALID_DEVICE: '등록된 Tasmota 전구가 아닙니다.',
+        DISABLED: 'Jarbis가 비활성화되어 있습니다.',
+    };
+    return failure(result || 'PAIR_FAILED', messages[result] ?? '자동 연결이 완료되지 않았습니다. 전구 상태를 확인해 주세요.');
+};
+
 export function device_pair(request, executor, fsops) {
     const args = request?.args ?? {};
     const id = args.id;
@@ -262,49 +293,27 @@ export function device_pair(request, executor, fsops) {
     if (type(replace) != 'bool' || type(password) != 'string' || length(password) > 64 ||
         match(password, /^[\x20-\x7e]*$/) == null)
         return failure('INVALID_VALUE', '기기 관리자 비밀번호 형식을 확인해 주세요.');
+
+    const io = fsops ?? { mkdtemp: mkdtemp, open: open, readfile: readfile,
+                          unlink: unlink, rmdir: rmdir };
     let path = null;
+    let response = null;
     try {
-        // fsops is an internal-only test seam; not taken from RPC arguments.
-        const io = fsops ?? { mkdtemp: mkdtemp, open: open, readfile: readfile,
-                              unlink: unlink, rmdir: rmdir };
         path = io.mkdtemp('/tmp/jarbis-pair-XXXXXX');
-        if (!path) return failure('PAIR_UNAVAILABLE', '안전한 임시 작업 공간을 만들지 못했습니다.');
-        const handle = io.open(path + '/request', 'wx', 0o600);
-        if (!handle) return failure('PAIR_UNAVAILABLE', '연결 요청 파일을 만들지 못했습니다.');
-        const payload = id + '\n' + password + '\n' + (replace ? '1' : '0') + '\n';
-        const written = handle.write(payload);
-        const closed = handle.close();
-        if (written != length(payload) || !closed)
-            return failure('PAIR_UNAVAILABLE', '연결 요청을 안전하게 저장하지 못했습니다.');
-        const command = ['/usr/libexec/jarbis-pair', path];
-        const rc = type(executor) == 'function' ? executor(command, 23000) : system(command, 23000);
-        const result = trim(io.readfile(path + '/result', 64) ?? '');
-        if (rc == 0 && (result == 'CONNECTED' || result == 'CONFIGURED'))
-            return success({ id: id, configured: true, mqttConfirmed: result == 'CONNECTED' });
-        const messages = {
-            WEB_AUTH_REQUIRED: '전구 관리자 인증이 필요합니다. 비밀번호를 입력해 주세요.',
-            BROKER_CONFLICT: '전구가 다른 MQTT Broker에 설정되어 있습니다. 기존 연결 변경을 승인해야 합니다.',
-            DEVICE_NOT_FOUND: 'HTTP로 발견된 전구가 없습니다. 다시 검색해 주세요.',
-            DEVICE_MISMATCH: '전구의 Topic 또는 응답이 검색 기록과 일치하지 않습니다.',
-            BROKER_UNAVAILABLE: '내장 MQTT Broker가 준비되지 않았습니다.',
-            CONNECTION_PENDING: '전구 설정 후 연결 확인이 완료되지 않았습니다. 잠시 후 다시 확인해 주세요.',
-            HTTP_UNAVAILABLE: '전구 관리 API에 접근하지 못했습니다.',
-            HTTP_CONFIG_FAILED: '전구에 MQTT 설정을 전달하지 못했습니다.',
-            UNSAFE_TARGET: '다른 네트워크로의 연결 요청을 차단했습니다.',
-            INVALID_PASSWORD: '관리자 비밀번호 형식이 올바르지 않습니다.',
-            INVALID_DEVICE: '등록된 Tasmota 전구가 아닙니다.',
-            DISABLED: 'Jarbis가 비활성화되어 있습니다.',
-        };
-        return failure(result || 'PAIR_FAILED', messages[result] ?? '자동 연결이 완료되지 않았습니다. 전구 상태를 확인해 주세요.');
-    } catch (e) {
-        return failure('PAIR_FAILED', '전구 자동 연결 요청을 완료하지 못했습니다.');
-    } finally {
-        if (path) {
-            try {
-                const io = fsops ?? { unlink: unlink, rmdir: rmdir };
-                for (let file in ['request', 'form', 'response', 'lwt', 'result']) io.unlink(path + '/' + file);
-                io.rmdir(path);
-            } catch (e) { /* best-effort cleanup; no secrets returned */ }
-        }
+        response = path
+            ? pair_in_directory(io, path, id, password, replace, executor)
+            : failure('PAIR_UNAVAILABLE', '안전한 임시 작업 공간을 만들지 못했습니다.');
     }
+    catch (e) {
+        response = failure('PAIR_FAILED', '전구 자동 연결 요청을 완료하지 못했습니다.');
+    }
+    // Deliberately outside try/catch: ucode has no `finally` keyword. The
+    // pairing helper may return early or throw, but cleanup always runs.
+    if (path) {
+        for (let file in ['request', 'form', 'response', 'lwt', 'result']) {
+            try { io.unlink(path + '/' + file); } catch (e) { /* ignore cleanup failures */ }
+        }
+        try { io.rmdir(path); } catch (e) { /* best effort */ }
+    }
+    return response;
 };

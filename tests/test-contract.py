@@ -163,6 +163,18 @@ class ProjectContracts(unittest.TestCase):
         self.assertNotIn('--post-data=', cli)
         self.assertIn('tests/test-pair.sh', (ROOT / 'spec/contracts_spec.sh').read_text())
 
+    def test_ucode_지원하지_않는_finally_구문을_금지하고_인증파일_정리를_보장한다(self):
+        import re
+        core = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
+        runner = (ROOT / 'tests/test-rpc-runtime.sh').read_text()
+        checker = (ROOT / 'tests/test-ucode.sh').read_text()
+        self.assertIsNone(re.search(r'\bfinally\s*\{', core))
+        self.assertIn('pair_in_directory(', core)
+        self.assertIn('io.unlink(path +', core)
+        self.assertIn('io.rmdir(path)', core)
+        self.assertIn('pairFailureCleanup', runner)
+        self.assertIn('ucode는 finally 구문을 지원하지 않습니다.', checker)
+
     def test_CI_상단에서_사전_검사를_실행한다(self):
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
         self.assertIn('name: Verify all tests are included in CI', ci)
