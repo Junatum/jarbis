@@ -36,6 +36,13 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn('9500', core)
         self.assertIn('reason: match(reason', core)
 
+    def test_상태_조회_ID_검증함수가_사용_전에_정의되어_있다(self):
+        source = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
+        self.assertEqual(source.count('function device_id(id)'), 1)
+        self.assertLess(source.index('function device_id(id)'),
+                        source.index('export function light_state('))
+        self.assertIn("if (!device_id(id)) return failure('INVALID_DEVICE'", source)
+
     def test_읽기와_쓰기_ACL은_분리하고_공개하지_않는다(self):
         acl = json.loads((ROOT / "root/usr/share/rpcd/acl.d/jarbis.json").read_text())
         self.assertEqual(acl['jarbis']['read']['ubus']['jarbis'], ['status', 'devices_list', 'light_state', 'discovery_list'])

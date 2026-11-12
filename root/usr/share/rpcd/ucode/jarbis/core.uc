@@ -106,6 +106,12 @@ export function light_set(request, publisher) {
     return success({ accepted: true, id: id, capability: capability, value: value });
 };
 
+// ucode resolves functions by declaration order; declare shared ID validation
+// before light_state() so RPC calls cannot reference an undeclared symbol.
+function device_id(id) {
+    return type(id) == 'string' && match(id, /^[A-Za-z_][A-Za-z0-9_]{0,47}$/) != null;
+};
+
 // A bounded MQTT STATUS11 query returns a fresh report from the Tasmota
 // device. MQTT publication alone is never treated as a physical state change.
 export function light_state(request, executor, fsops) {
@@ -213,9 +219,6 @@ function managed_command(args, executor) {
         return (type(executor) == 'function' ? executor(command, 10000) : system(command, 10000)) == 0;
     }
     catch (e) { return false; }
-};
-function device_id(id) {
-    return type(id) == 'string' && match(id, /^[A-Za-z_][A-Za-z0-9_]{0,47}$/) != null;
 };
 function device_name(name) {
     return type(name) == 'string' && match(name, /^[A-Za-z0-9 _-]{1,48}$/) != null;

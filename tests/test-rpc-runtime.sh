@@ -55,6 +55,7 @@ const mock_publish = function(argv, timeout) {
     return 0;
 };
 let pair_cleanup = [];
+let invalid_state_executed = false;
 const result = {
     status: status(function() { return 0; }),
     enabled: settings_update({ args: { enabled: true } }, function(argv) { return argv[1] == 'enabled' && argv[2] == '1' ? 0 : 1; }),
@@ -108,6 +109,14 @@ const result = {
     temperature: light_set({ args: { id: 'living_room', capability: 'color_temperature', value: '300' } }, mock_publish),
     badColor: light_set({ args: { id: 'living_room', capability: 'color', value: '#FF0000' } }, mock_publish),
     badCT: light_set({ args: { id: 'living_room', capability: 'color_temperature', value: '999' } }, mock_publish),
+    stateInvalidId: light_state({ args: { id: '../../escape' } }, function() {
+        invalid_state_executed = true;
+        return 0;
+    }),
+    stateMissingId: light_state({ args: {} }, function() {
+        invalid_state_executed = true;
+        return 0;
+    }),
     state: light_state({ args: { id: 'living_room' } }, function(argv, timeout) {
         return argv[0] == '/usr/libexec/jarbis-state' && timeout == 9500 ? 0 : 1;
     }, {
@@ -120,6 +129,7 @@ const result = {
         readfile: function() { return null; },
         unlink: function() { return true; }, rmdir: function() { return true; },
     }),
+    stateInvalidExecutorCalled: invalid_state_executed,
     topLevelOnly: light_set({ id: 'living_room', capability: 'power', value: 'ON' }, mock_publish),
     invalidDevice: light_set({ args: { id: '../../x', capability: 'power', value: 'ON' } }, mock_publish),
     invalidCapability: light_set({ args: { id: 'living_room', capability: 'raw', value: 'ON' } }, mock_publish),
@@ -182,6 +192,9 @@ success_data('temperature')
 require(success_data('state').get('power') == 'ON', '기기 실제 전원 조회')
 require(success_data('state').get('brightness') == 55, '기기 실제 밝기 조회')
 require(success_data('stateMissing').get('observed') is False, '응답 없는 기기는 상태 확인 불가')
+expect_error('stateInvalidId', 'INVALID_DEVICE')
+expect_error('stateMissingId', 'INVALID_DEVICE')
+require(r.get('stateInvalidExecutorCalled') is False, '잘못된 기기 ID에서 상태 조회 실행 금지')
 expect_error('badColor', 'INVALID_VALUE')
 expect_error('badCT', 'INVALID_VALUE')
 require(success_data('pairSuccess').get('mqttConfirmed') is True, 'Tasmota 자동 연결 RPC 확인')
