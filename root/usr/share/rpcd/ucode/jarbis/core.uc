@@ -27,7 +27,7 @@ export function status(checker) {
         }
         return success({
             apiVersion: 1,
-            version: '0.1.0-r7',
+            version: '0.1.0-r8',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',
@@ -57,7 +57,7 @@ export function devices_list() {
                 topic: dev.topic ?? '',
                 enabled: dev.enabled == '1',
                 capabilities: dev.kind == 'light' && dev.protocol == 'tasmota'
-                    ? ['power', 'brightness'] : [],
+                    ? ['power', 'brightness', 'color', 'color_temperature'] : [],
             });
         });
         return success({ devices: result });
@@ -81,7 +81,8 @@ export function light_set(request, publisher) {
     const value = args.value;
     if (type(id) != 'string' || match(id, /^[A-Za-z_][A-Za-z0-9_]{0,47}$/) == null)
         return failure('INVALID_DEVICE', '기기 ID가 올바르지 않습니다.');
-    if (capability != 'power' && capability != 'brightness')
+    if (capability != 'power' && capability != 'brightness' &&
+        capability != 'color' && capability != 'color_temperature')
         return failure('INVALID_CAPABILITY', '지원하지 않는 기기 기능입니다.');
     if (type(value) != 'string')
         return failure('INVALID_VALUE', '제어 값이 올바르지 않습니다.');
@@ -89,6 +90,11 @@ export function light_set(request, publisher) {
         return failure('INVALID_VALUE', '전원 값은 ON 또는 OFF여야 합니다.');
     if (capability == 'brightness' && match(value, /^(100|[1-9]?[0-9])$/) == null)
         return failure('INVALID_VALUE', '밝기는 0부터 100 사이여야 합니다.');
+    if (capability == 'color' && match(value, /^[0-9A-Fa-f]{6}$/) == null)
+        return failure('INVALID_VALUE', '색상은 6자리 RGB 코드여야 합니다.');
+    if (capability == 'color_temperature' &&
+        (match(value, /^[0-9]{3}$/) == null || int(value) < 153 || int(value) > 500))
+        return failure('INVALID_VALUE', '색온도는 153부터 500 mired 사이여야 합니다.');
 
     try {
         // No shell invocation, no interpolation. The CLI independently verifies UCI
@@ -98,6 +104,42 @@ export function light_set(request, publisher) {
     }
     catch (e) { return failure('PUBLISH_FAILED', '기기 명령을 전송하지 못했습니다.'); }
     return success({ accepted: true, id: id, capability: capability, value: value });
+};
+
+// A bounded MQTT STATUS11 query returns a fresh report from the Tasmota
+// device. MQTT publication alone is never treated as a physical state change.
+export function light_state(request, executor, fsops) {
+    const id = request?.args?.id;
+    if (!device_id(id)) return failure('INVALID_DEVICE', '기기 ID가 올바르지 않습니다.');
+    const io = fsops ?? { mkdtemp: mkdtemp, readfile: readfile,
+                          unlink: unlink, rmdir: rmdir };
+    let path = null;
+    let raw = null;
+    try {
+        path = io.mkdtemp('/tmp/jarbis-state-XXXXXX');
+        if (path) {
+            const command = ['/usr/libexec/jarbis-state', id, path];
+            const rc = type(executor) == 'function' ? executor(command, 6500) : system(command, 6500);
+            if (rc == 0) raw = trim(io.readfile(path + '/state', 128) ?? '');
+        }
+    } catch (e) { raw = null; }
+    if (path) {
+        for (let name in ['reply', 'state']) {
+            try { io.unlink(path + '/' + name); } catch (e) { /* best effort */ }
+        }
+        try { io.rmdir(path); } catch (e) { /* best effort */ }
+    }
+    const fields = split(raw ?? '', '|');
+    if (length(fields) != 4 || (fields[0] != 'ON' && fields[0] != 'OFF'))
+        return success({ id: id, observed: false, power: null,
+                         brightness: null, color: null, colorTemperature: null });
+    const d = fields[1], c = fields[2], ct = fields[3];
+    return success({
+        id: id, observed: true, power: fields[0],
+        brightness: match(d, /^(100|[1-9]?[0-9])$/) != null ? int(d) : null,
+        color: match(c, /^[0-9A-F]{6}$/) != null ? '#' + c : null,
+        colorTemperature: match(ct, /^[0-9]{3}$/) != null && int(ct) >= 153 && int(ct) <= 500 ? int(ct) : null,
+    });
 };
 
 // The cache contains only validated, non-secret candidate fields. It is not a

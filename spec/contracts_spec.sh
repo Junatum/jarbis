@@ -8,6 +8,13 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The error should be blank
   End
 
+  It '전구 MQTT STATUS11 상태 수신과 실패 시 안전한 처리를 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-state.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
   It '패키지·RPC·ACL·버전 및 보안 계약을 확인한다'
     When run command python3 "$SHELLSPEC_PROJECT_ROOT/tests/test-contract.py"
     The status should be success

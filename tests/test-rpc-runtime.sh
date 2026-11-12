@@ -47,7 +47,7 @@ export function unlink(path) { return true; };
 export function rmdir(path) { return true; };
 STUB
 cat > "$RUNNER" <<'UCRUN'
-import { status, devices_list, light_set, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials, device_pair } from './jarbis/core.uc';
+import { status, devices_list, light_set, light_state, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials, device_pair } from './jarbis/core.uc';
 import { set_unavailable } from 'uci';
 let published = null;
 const mock_publish = function(argv, timeout) {
@@ -104,6 +104,22 @@ const result = {
     on: light_set({ args: { id: 'living_room', capability: 'power', value: 'ON' } }, mock_publish),
     publish: published,
     brightness: light_set({ args: { id: 'living_room', capability: 'brightness', value: '90' } }, mock_publish),
+    color: light_set({ args: { id: 'living_room', capability: 'color', value: 'FF8800' } }, mock_publish),
+    temperature: light_set({ args: { id: 'living_room', capability: 'color_temperature', value: '300' } }, mock_publish),
+    badColor: light_set({ args: { id: 'living_room', capability: 'color', value: '#FF0000' } }, mock_publish),
+    badCT: light_set({ args: { id: 'living_room', capability: 'color_temperature', value: '999' } }, mock_publish),
+    state: light_state({ args: { id: 'living_room' } }, function(argv, timeout) {
+        return argv[0] == '/usr/libexec/jarbis-state' && timeout == 6500 ? 0 : 1;
+    }, {
+        mkdtemp: function() { return '/tmp/jarbis-state-MOCK12'; },
+        readfile: function() { return 'ON|55|FF8800|250\n'; },
+        unlink: function() { return true; }, rmdir: function() { return true; },
+    }),
+    stateMissing: light_state({ args: { id: 'living_room' } }, function() { return 1; }, {
+        mkdtemp: function() { return '/tmp/jarbis-state-MOCK12'; },
+        readfile: function() { return null; },
+        unlink: function() { return true; }, rmdir: function() { return true; },
+    }),
     topLevelOnly: light_set({ id: 'living_room', capability: 'power', value: 'ON' }, mock_publish),
     invalidDevice: light_set({ args: { id: '../../x', capability: 'power', value: 'ON' } }, mock_publish),
     invalidCapability: light_set({ args: { id: 'living_room', capability: 'raw', value: 'ON' } }, mock_publish),
@@ -154,13 +170,20 @@ devices_data = success_data('devices')
 devices = devices_data.get('devices')
 require(isinstance(devices, list) and len(devices) == 2, 'UCI 기기 목록 개수')
 require(devices[0].get('id') == 'living_room', 'UCI 기기 ID')
-require(devices[0].get('capabilities') == ['power', 'brightness'], '지원 capability')
+require(devices[0].get('capabilities') == ['power', 'brightness', 'color', 'color_temperature'], '지원 capability')
 require('must-not-leak' not in json.dumps(r), 'UCI 비밀값 노출')
 require(len(success_data('discoveredMissing')['devices']) == 0, '캐시 파일이 없는 경우 빈 목록 반환')
 require(len(success_data('discovered')['devices']) == 1, '중복 및 위험 기기 검색 결과 필터링')
 require(len(success_data('scan')['devices']) == 1, '검색 RPC 실행 및 결과 수신')
 require(success_data('on').get('accepted') is True, 'request.args 기반 전원 제어')
 success_data('brightness')
+success_data('color')
+success_data('temperature')
+require(success_data('state').get('power') == 'ON', '기기 실제 전원 조회')
+require(success_data('state').get('brightness') == 55, '기기 실제 밝기 조회')
+require(success_data('stateMissing').get('observed') is False, '응답 없는 기기는 상태 확인 불가')
+expect_error('badColor', 'INVALID_VALUE')
+expect_error('badCT', 'INVALID_VALUE')
 require(success_data('pairSuccess').get('mqttConfirmed') is True, 'Tasmota 자동 연결 RPC 확인')
 expect_error('pairInvalid', 'INVALID_DEVICE')
 expect_error('pairFailureCleanup', 'BROKER_UNAVAILABLE')

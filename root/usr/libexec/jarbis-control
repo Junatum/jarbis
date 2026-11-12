@@ -29,7 +29,7 @@ valid_host() {
     [ "${#1}" -le 253 ]
 }
 
-[ "$#" -eq 4 ] || fail 'expected: light-set <id> <power|brightness> <value>'
+[ "$#" -eq 4 ] || fail 'expected: light-set <id> <power|brightness|color|color_temperature> <value>'
 [ "$1" = light-set ] || fail 'unsupported action'
 id="$2"; capability="$3"; value="$4"
 valid_id "$id" || fail 'invalid device id'
@@ -42,6 +42,18 @@ case "$capability" in
     brightness)
         case "$value" in 0|[1-9]|[1-9][0-9]|100) ;; *) fail 'brightness must be 0..100' ;; esac
         command=Dimmer
+        ;;
+    color)
+        case "$value" in
+            ??????) case "$value" in *[!a-fA-F0-9]*) fail 'color must be RRGGBB' ;; esac ;;
+            *) fail 'color must be RRGGBB' ;;
+        esac
+        command=Color
+        ;;
+    color_temperature)
+        case "$value" in ''|*[!0-9]*) fail 'CT must be 153..500' ;; esac
+        [ "$value" -ge 153 ] 2>/dev/null && [ "$value" -le 500 ] 2>/dev/null || fail 'CT must be 153..500'
+        command=CT
         ;;
     *) fail 'unsupported capability' ;;
 esac

@@ -37,6 +37,10 @@ sh "$control" light-set living_room power ON || fail '켜기 명령 실패'
 grep -F -- '-t cmnd/livingroom/POWER -m ON' "$MOCK_PUBLISH_LOG" >/dev/null || fail '전원 토픽 오류'
 sh "$control" light-set living_room brightness 50 || fail '밝기 명령 실패'
 grep -F -- '-t cmnd/livingroom/Dimmer -m 50' "$MOCK_PUBLISH_LOG" >/dev/null || fail '밝기 토픽 오류'
+sh "$control" light-set living_room color FF8800 || fail '색상 명령 실패'
+grep -F -- '-t cmnd/livingroom/Color -m FF8800' "$MOCK_PUBLISH_LOG" >/dev/null || fail 'RGB 색상 토픽 오류'
+sh "$control" light-set living_room color_temperature 250 || fail '색온도 명령 실패'
+grep -F -- '-t cmnd/livingroom/CT -m 250' "$MOCK_PUBLISH_LOG" >/dev/null || fail 'CT 토픽 오류'
 
 must_reject() {
     rm -f "$MOCK_PUBLISH_LOG"
@@ -55,6 +59,10 @@ must_reject light-set living_room brightness 050
 must_reject light-set living_room brightness -1
 must_reject light-set living_room brightness '1;touch /tmp/pwned'
 must_reject light-set living_room color red
+must_reject light-set living_room color '#FF8800'
+must_reject light-set living_room color 'FF8800;'
+must_reject light-set living_room color_temperature 152
+must_reject light-set living_room color_temperature 501
 must_reject execute living_room power ON
 MOCK_ENABLED=0; export MOCK_ENABLED
 must_reject light-set living_room power ON

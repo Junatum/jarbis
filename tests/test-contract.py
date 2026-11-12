@@ -27,7 +27,7 @@ class ProjectContracts(unittest.TestCase):
 
     def test_읽기와_쓰기_ACL은_분리하고_공개하지_않는다(self):
         acl = json.loads((ROOT / "root/usr/share/rpcd/acl.d/jarbis.json").read_text())
-        self.assertEqual(acl['jarbis']['read']['ubus']['jarbis'], ['status', 'devices_list', 'discovery_list'])
+        self.assertEqual(acl['jarbis']['read']['ubus']['jarbis'], ['status', 'devices_list', 'light_state', 'discovery_list'])
         self.assertEqual(acl['jarbis']['write']['ubus']['jarbis'], ['light_set', 'discovery_scan', 'settings_update', 'device_add', 'device_update', 'device_remove', 'device_pair', 'broker_credentials'])
         self.assertNotIn('unauthenticated', json.dumps(acl))
 
@@ -47,6 +47,7 @@ class ProjectContracts(unittest.TestCase):
         paths = [
             'root/etc/config/jarbis',
             'root/usr/libexec/jarbis-control',
+            'root/usr/libexec/jarbis-state',
             'root/usr/share/rpcd/acl.d/jarbis.json',
             'root/usr/share/rpcd/ucode/jarbis.uc',
             'root/usr/share/rpcd/ucode/jarbis/core.uc',
@@ -55,7 +56,7 @@ class ProjectContracts(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue((ROOT / path).is_file())
                 self.assertIn('./' + path, mk)
-        plugin = (ROOT / paths[3]).read_text()
+        plugin = (ROOT / 'root/usr/share/rpcd/ucode/jarbis.uc').read_text()
         self.assertIn('return { jarbis: methods };', plugin)
 
     def test_비밀과_임의_MQTT_명령이_RPC로_노출되지_않는다(self):
@@ -150,7 +151,7 @@ class ProjectContracts(unittest.TestCase):
         mk = (ROOT / 'Makefile').read_text()
         cli = (ROOT / 'root/usr/libexec/jarbis-pair').read_text()
         rpc = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
-        self.assertIn('PKG_RELEASE:=7', mk)
+        self.assertIn('PKG_RELEASE:=8', mk)
         self.assertIn('./root/usr/libexec/jarbis-pair', mk)
         self.assertIn('export function device_pair(', rpc)
         self.assertIn("mkdtemp('/tmp/jarbis-pair-XXXXXX')", rpc)

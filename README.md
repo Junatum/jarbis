@@ -18,7 +18,7 @@ SmartSafeHub의 경량 로컬 홈 자동화 엔진입니다. *Iron Man*의 J.A.R
 - ShellSpec 0.28.1 기반 셸 계약 테스트, Python 정적 계약 검사, OpenWrt 25.12 BusyBox 명령 감사, ucode 컴파일 및 실제 RPC 런타임 CI
 - 설치·업데이트 후 누락된 `jarbis` RPC 객체에 대해 제한적 재확인 및 복구; `keep.d`로 UCI/MQTT 자격 증명 보존
 
-**미구현:** 검색 결과 자동 등록, 전구 MQTT 자동 설정, 상태 수신/동기화, 예약·조건식 자동화, 장면(Scene), AI, SmartSafeHub 프론트엔드 UI. 현재 `light_set`의 `accepted: true`는 **브로커 게시 성공**만 의미하며, 실제 전구 동작 확인은 아닙니다.
+**미구현:** 검색 결과 자동 등록, 전구 MQTT 자동 설정, 예약·조건식 자동화, 장면(Scene), AI, SmartSafeHub 프론트엔드 UI. 현재 `light_set`의 `accepted: true`는 **브로커 게시 성공**만 의미하며, 실제 전구 동작 확인은 아닙니다.
 
 ## OpenWrt 패키지 빌드
 
@@ -102,3 +102,10 @@ ubus call jarbis device_pair '{"id":"tasmota_tasmota_CB0735","admin_password":""
 실제 기기 ID는 `ubus call jarbis devices_list '{}'` 결과를 확인하세요.
 `mqttConfirmed: false`는 설정 반영은 확인했지만 MQTT 온라인 응답을 아직 검증하지 못했다는 의미입니다.
 HTTP 통신은 로컬 LAN에서 암호화되지 않으므로 신뢰할 수 있는 네트워크에서만 사용하세요.
+
+
+## 실기기 상태 조회 및 RGB/CCT (0.1.0-r8)
+
+`ubus call jarbis light_state '{"id":"tasmota_tasmota_CB0735"}'`는 MQTT로 `Status 11`을 요청하고, 해당 전구의 `stat/<topic>/STATUS11` 응답이 도착한 경우에만 `observed: true`를 반환합니다. 응답이 없으면 `observed: false`이며 오프라인으로 단정하지 않습니다. 조회는 호출 시에만 실행되며 별도 상주 프로세스가 없습니다.
+
+RGB 색상은 `light_set`의 `capability=color`와 `RRGGBB` 형식의 값으로, 색온도는 `capability=color_temperature`와 Tasmota `CT` 값(153~500 mired)으로 전송합니다. 일부 전구에서는 해당 기능이 지원되지 않을 수 있습니다. 모든 제어 명령의 성공 응답은 MQTT 게시 성공일 뿐이며 실제 상태는 `light_state`에서 다시 확인해야 합니다.

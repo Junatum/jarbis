@@ -1,0 +1,72 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Read one fresh Tasmota STATUS11 reply. No resident poller, credentials in argv,
+# or persistent state files. The RPC creates the private output directory.
+set -eu
+umask 077
+UCI_BIN="${JARBIS_UCI_BIN:-uci}"
+PUB_BIN="${JARBIS_MQTT_PUB_BIN:-mosquitto_pub}"
+SUB_BIN="${JARBIS_MQTT_SUB_BIN:-mosquitto_sub}"
+JSON_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
+CONFIG_DIR="${JARBIS_MQTT_CONFIG_DIR:-/etc/jarbis}"
+fail() { printf 'jarbis-state: %s\n' "$1" >&2; exit 1; }
+get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
+[ "$#" -eq 2 ] || fail 'expected <device-id> <private-output-directory>'
+id="$1"; output="$2"
+case "$id" in ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]* ) fail 'invalid id' ;; esac
+[ "${#id}" -le 48 ] || fail 'id too long'
+# Do not let untrusted ubus callers choose the destination. The directory is
+# created by native fs.mkdtemp() in the RPC with mode 0700.
+case "$output" in /tmp/jarbis-state-*) ;; *) fail 'invalid output directory' ;; esac
+[ -d "$output" ] && [ ! -L "$output" ] || fail 'missing private output directory'
+[ "$(get jarbis.main.enabled)" = 1 ] || fail 'Jarbis disabled'
+[ "$(get "jarbis.$id")" = device ] || fail 'unknown device'
+[ "$(get "jarbis.$id.enabled")" = 1 ] || fail 'device disabled'
+[ "$(get "jarbis.$id.kind")" = light ] || fail 'not a light'
+[ "$(get "jarbis.$id.protocol")" = tasmota ] || fail 'unsupported protocol'
+topic="$(get "jarbis.$id.topic")"
+case "$topic" in ''|*[!a-zA-Z0-9_-]*) fail 'invalid topic' ;; esac
+[ "${#topic}" -le 96 ] || fail 'topic too long'
+host="$(get jarbis.broker.host)"; port="$(get jarbis.broker.port)"
+case "$host" in ''|-*|*[!a-zA-Z0-9.:_-]*) fail 'invalid broker host' ;; esac
+case "$port" in ''|*[!0-9]*) fail 'invalid broker port' ;; esac
+[ "$port" -ge 1 ] 2>/dev/null && [ "$port" -le 65535 ] 2>/dev/null || fail 'invalid broker port'
+[ "$CONFIG_DIR" = /etc/jarbis ] || [ "${JARBIS_TEST_MODE:-}" = 1 ] || fail 'invalid client config dir'
+for client in mosquitto_sub mosquitto_pub; do
+    if [ -e "$CONFIG_DIR/$client" ]; then
+        [ -f "$CONFIG_DIR/$client" ] && [ ! -L "$CONFIG_DIR/$client" ] || fail 'invalid auth file'
+        mode="$(LC_ALL=C ls -ld "$CONFIG_DIR/$client" 2>/dev/null | cut -c 1-10)"
+        [ "$mode" = '-rw-------' ] || fail 'MQTT auth file requires mode 0600'
+    fi
+done
+command -v "$SUB_BIN" >/dev/null 2>&1 || fail 'subscriber unavailable'
+command -v "$PUB_BIN" >/dev/null 2>&1 || fail 'publisher unavailable'
+command -v "$JSON_BIN" >/dev/null 2>&1 || fail 'JSON parser unavailable'
+# -W is supported by mosquitto_sub, but not by mosquitto_pub on OpenWrt.
+# Refuse to subscribe if the client cannot bound its wait time.
+"$SUB_BIN" --help 2>&1 | grep -q -- '-W' || fail 'bounded MQTT subscribe unsupported'
+XDG_CONFIG_HOME="$CONFIG_DIR" HOME="$CONFIG_DIR" \
+    "$SUB_BIN" -h "$host" -p "$port" -W 3 -C 1 -R \
+    -t "stat/$topic/STATUS11" > "$output/reply" 2>/dev/null &
+subpid="$!"
+trap 'kill "$subpid" 2>/dev/null || :; wait "$subpid" 2>/dev/null || :' EXIT HUP INT TERM
+# Establish the subscription before sending the request or the short-lived
+# STATUS11 response can be lost. At most one second of setup per selected bulb.
+sleep 1
+if ! XDG_CONFIG_HOME="$CONFIG_DIR" HOME="$CONFIG_DIR" \
+    "$PUB_BIN" -h "$host" -p "$port" -q 1 -t "cmnd/$topic/Status" -m 11 >/dev/null 2>&1; then
+    fail 'query publish failed'
+fi
+wait "$subpid" || fail 'no STATUS11 reply'
+trap - EXIT HUP INT TERM
+[ -s "$output/reply" ] || fail 'empty STATUS11 reply'
+# Read only expected fields, never let arbitrary JSON escape into the RPC/UI.
+read_field() { "$JSON_BIN" -i "$output/reply" -e "@.StatusSTS.$1" 2>/dev/null || :; }
+power="$(read_field POWER)"; dimmer="$(read_field Dimmer)"
+color="$(read_field Color)"; ct="$(read_field CT)"
+case "$power" in ON|OFF) ;; *) fail 'invalid power status' ;; esac
+case "$dimmer" in ''|*[!0-9]*) dimmer='' ;; *) [ "$dimmer" -le 100 ] 2>/dev/null || dimmer='' ;; esac
+case "$color" in ''|*[!a-fA-F0-9]*) color='' ;; *) color="$(printf '%.6s' "$color" | tr 'a-f' 'A-F')" ;; esac
+[ "${#color}" -eq 6 ] || color=''
+case "$ct" in ''|*[!0-9]*) ct='' ;; *) [ "$ct" -ge 153 ] 2>/dev/null && [ "$ct" -le 500 ] 2>/dev/null || ct='' ;; esac
+printf '%s|%s|%s|%s\n' "$power" "$dimmer" "$color" "$ct" > "$output/state"
