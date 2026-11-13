@@ -2,110 +2,106 @@
 
 **Jarbis — Just A Rather Very Beautiful Intelligent System**
 
-SmartSafeHub의 경량 로컬 홈 자동화 엔진입니다. *Iron Man*의 J.A.R.V.I.S.를 패러디한 이름으로, Marvel 공식 제품과 관련이 없습니다. 영문 풀이는 사용자 프로젝트의 원래 표현을 그대로 유지합니다.
+SmartSafeHub용 **OpenWrt 경량 로컬 스마트홈 엔진**입니다. 현재 Tasmota Wi-Fi 전구의 검색·등록·연결·전원·밝기·RGB 색상·색온도 제어를 지원합니다. 이름은 대중문화 속 J.A.R.V.I.S.에서 착안한 비공식 명칭이며 Marvel과 관련이 없습니다.
 
-- **버전:** 0.1.0-r6 (MQTT Broker 관리 및 스마트홈 웹 연동 RPC)
-- **라이선스:** GPL-3.0-or-later
-- **대상:** OpenWrt 25.12 / SmartSafeHub (기본 기능에 대한 하드웨어별 실기 검증 필요)
-- **런타임:** BusyBox ash, UCI, rpcd-ucode, Mosquitto Broker/Client, uclient-fetch, jsonfilter. Python/Node.js/AI 런타임 불필요. MQTT Broker는 procd로 관리됩니다.
+- **패키지 버전:** `0.1.0-r11` (기능 버전 `0.1.0`, OpenWrt 패키지 revision `11`)
+- **라이선스:** `GPL-3.0-or-later` ([LICENSE](LICENSE))
+- **플랫폼:** OpenWrt 25.12 기반 SmartSafeHub. 모델별 설치 용량·RAM·MQTT 의존성 검증 필요
+- **런타임:** BusyBox ash, UCI, rpcd-ucode, Mosquitto, uclient-fetch, jsonfilter. Python, Node.js, 상주 AI 서비스는 불필요
+- **상태:** 초기 개발 버전. 일반 사용자용 배포 전 실기기 검증이 필요합니다
 
-## 현재 구현
+## 기능과 제한 사항
 
-- 독립 `jarbis` OpenWrt 패키지, UCI 설정, 인증된 ubus API, 세분화된 ACL
-- 등록한 Tasmota 전구의 전원(`POWER`)과 밝기(`Dimmer`) MQTT 명령 송신
-- 전용 MQTT 클라이언트 설정 파일을 이용한 인증 정보 분리 (명령행에 비밀번호 노출하지 않음)
-- 새 설치 시 기능 **기본 비활성화**. 기능 활성화 후 Jarbis 서비스 시작 시 전용 인증 MQTT Broker를 구성하며 WAN 포트/방화벽 규칙은 열지 않음
-- ShellSpec 0.28.1 기반 셸 계약 테스트, Python 정적 계약 검사, OpenWrt 25.12 BusyBox 명령 감사, ucode 컴파일 및 실제 RPC 런타임 CI
-- 설치·업데이트 후 누락된 `jarbis` RPC 객체에 대해 제한적 재확인 및 복구; `keep.d`로 UCI/MQTT 자격 증명 보존
+| 기능 | 상태 |
+| --- | --- |
+| 독립 `jarbis` 패키지, UCI, 인증된 RPC, 읽기/쓰기 ACL | 구현 |
+| 기본 비활성화 및 로컬 인증형 MQTT Broker (기존 설정 보호) | 구현 |
+| DHCP/HTTP 및 Tasmota MQTT Discovery 후보 검색 | 구현, 자동 등록하지 않음 |
+| 기기 등록·수정·삭제 및 수동 전구 제어 | 구현 |
+| 사용자 승인 후 Tasmota MQTT 자동 연결 | 구현, 기기/인증 환경에 따라 실패 가능 |
+| 전구의 응답 상태 조회 (`light_state`) | 구현, HTTP 우선/MQTT 대체, 미확인은 미확인으로 표시 |
+| 전원·밝기·RGB 색상·색온도 | 구현, 전구 모델별 지원 범위 상이 |
+| 예약, Scene, 조건식 자동화, 온디바이스 AI | 미구현 |
+| Matter/Zigbee 등 Tasmota 외 프로토콜 | 미구현 |
 
-**미구현:** 검색 결과 자동 등록, 전구 MQTT 자동 설정, 예약·조건식 자동화, 장면(Scene), AI, SmartSafeHub 프론트엔드 UI. 현재 `light_set`의 `accepted: true`는 **브로커 게시 성공**만 의미하며, 실제 전구 동작 확인은 아닙니다.
+Jarbis는 SmartSafeHub의 **공유기 웹사이트** 스마트홈 화면과 연동하는 독립 백엔드입니다. 프론트엔드 소스는 `luci-app-smartsafehub`에서 관리하며 이 저장소에는 웹 빌드 결과물을 포함하지 않습니다. Jarbis만 설치해도 별도 LuCI 메뉴가 자동 추가되지는 않습니다. 상세 연동 계약은 [docs/INTEGRATION.md](docs/INTEGRATION.md)를 확인하세요.
 
-## OpenWrt 패키지 빌드
+## 설치 및 빌드
 
-이 저장소를 OpenWrt 빌드 트리의 `package/jarbis` 또는 자체 피드에 넣습니다.
+OpenWrt 소스 트리의 `package/jarbis` 또는 적절한 패키지 피드에 이 저장소를 배치합니다.
 
 ```sh
-make menuconfig                 # Utilities > jarbis 선택
+make menuconfig               # Utilities > jarbis 선택
 make package/jarbis/compile V=s
 ```
 
-`jarbis` 신규 설치는 `mosquitto-ssl`, `mosquitto-client-ssl`을 함께 의존성으로 설치합니다. OpenWrt 25.12 빌드 구성에 `CONFIG_MOSQUITTO_PASSWD=y`가 필요합니다. 기존에 Mosquitto 리스너/브리지가 있거나 `use_uci=1`인 환경은 관리형 초기화를 거부하므로 `jarbis.broker.mode=external`로 전환해 기존 Broker를 사용하세요. GL-MT300N-V2 같은 소형 공유기에서는 펌웨어 용량과 메모리 측정이 필요합니다.
+`Makefile`은 `rpcd-mod-ucode`, `ucode-mod-uci`, `ucode-mod-fs`, `mosquitto-ssl`, `mosquitto-client-ssl`, `uclient-fetch`, `jsonfilter`를 의존성으로 선언합니다. 관리형 Broker 초기화에는 `mosquitto_passwd` 실행 파일도 필요합니다. OpenWrt 빌드 설정에서 `CONFIG_MOSQUITTO_PASSWD=y` 제공 여부를 확인하세요.
 
-## 실기기 초기 테스트 (신규 설치)
+설치 후 Jarbis는 **비활성화** 상태입니다. 앱의 설치·업데이트·복원은 SmartSafeHub Apps 배포 정책에 따라 별도로 승인·검증해야 합니다. 특히 소형 장치에서는 펌웨어 크기, 사용 가능 저장공간과 메모리를 실측해야 합니다.
 
-1. `uci set jarbis.main.enabled=1 && uci commit jarbis`로 기능을 켭니다. 이미 기기를 등록한 공유기에서는 기존 UCI를 덮어쓰지 않습니다. `0.1.0-r4`에서 업그레이드한 경우 `option mode`가 없으면 기존 외부 브로커로 계속 운영되므로, 관리형을 사용하고 싶다면 `uci set jarbis.broker.mode=managed && uci commit jarbis`를 명시적으로 실행하세요.
-2. `/etc/init.d/jarbis start`를 실행합니다. 이때 **최초 한 번만** 랜덤 비밀번호를 생성하고 `mosquitto_passwd -U`로 해시합니다. 기존 Mosquitto 리스너/설정이 있다면 실패하고 설정을 변경하지 않습니다. `status`는 준비 여부만 확인할 수 있습니다: `/usr/libexec/jarbis-broker status`.
-3. 기기의 MQTT 설정에서 Host를 **공유기 LAN IP**, Port `1883`, Username `jarbis`로 설정합니다. 인증 정보는 공유기 SSH에서 `cat /etc/jarbis/device-credentials`로 *관리자만* 확인하세요. 이 파일과 관련 파일은 공유기 루트 전용(0600)이며 웹 API에는 노출되지 않습니다. **자동 검색은 인증·설정 변경을 하지 않습니다.** 전구의 MQTT 설정은 이 단계에서 수동 입력합니다.
-4. 공유기에서 아래 읽기 전용 검색을 실행합니다. HTTP 검색은 DHCP 임대 목록에 기록된 `/24` LAN 기기 **최대 16대**를 대상으로 합니다. `ipaddr=192.168.1.1/24` 형식도 인식하며 일반 HTTP 요청은 1초, Tasmota 이름으로 확인된 일부 후보는 최대 2초 타임아웃과 4KiB 응답 제한이 있습니다. Tasmota HTTP 응답의 `Status.Topic`과 `StatusFWR.Version`을 사용하며 버전 문자열에 `tasmota`라는 단어가 없는 제조사 빌드도 인식합니다. MQTT 검색은 `tasmota/discovery/+/config`의 retained 메시지를 2초, 최대 32KiB까지만 수집합니다. 브로커와 HTTP를 함께 사용해 후보를 모읍니다.
+## 처음 사용하기
 
-```sh
-ubus call jarbis status '{}'
-ubus call jarbis discovery_scan '{}'
-ubus call jarbis discovery_list '{}'
-```
+> 실제 전구 MQTT 설정을 바꾸는 작업은 같은 신뢰할 수 있는 LAN에서만 수행하고, 기존 MQTT 서버가 연결된 기기는 변경 승인 후 진행하세요.
 
-검색한 기기는 **후보 목록**일 뿐입니다. `devices_list`나 `light_set`로 바로 접근할 수 없으며, 사용자 승인 후 `config device`를 따로 등록해야 합니다. 이미 연결된 기기라도 Tasmota 웹 비밀번호가 필요하면 HTTP 검색은 그 기기를 건너뜁니다. DHCP 리스가 없거나 `/24`가 아닌 LAN에서는 HTTP 검색을 생략하고 MQTT 검색만 합니다. 표준 Tasmota FullTopic `%prefix%/%topic%/`만 지원합니다. 실행 후 결과 캐시는 `/tmp/jarbis-discovery.records`이며 재부팅 시 사라집니다.
+1. 공유기 웹사이트의 **스마트홈** 메뉴에서 Jarbis를 켭니다. SSH로는 다음과 같이 시작할 수 있습니다.
 
-```sh
-# AiYaTo를 승인하여 수동 등록하는 예시 (검색만으로 추가되지 않음)
-uci set jarbis.aiyato_cb0735=device
-uci set jarbis.aiyato_cb0735.enabled=1
-uci set jarbis.aiyato_cb0735.name='AiYaTo'
-uci set jarbis.aiyato_cb0735.kind=light
-uci set jarbis.aiyato_cb0735.protocol=tasmota
-uci set jarbis.aiyato_cb0735.topic=aiyato_cb0735
-uci commit jarbis
-ubus call jarbis light_set '{"id":"aiyato_cb0735","capability":"power","value":"ON"}'
-```
+   ```sh
+   uci set jarbis.main.enabled=1
+   uci commit jarbis
+   /etc/init.d/jarbis start
+   ubus call jarbis status '{}'
+   ```
 
-Broker와 클라이언트는 LAN에서 암호화되지 않은 MQTT(1883)을 사용하므로 **신뢰할 수 있는 LAN에서만** 사용하세요. 기존 MQTT 환경을 쓰려면 `uci set jarbis.broker.mode=external` 후 host/port 및 `/etc/jarbis/mosquitto_pub`·`mosquitto_sub`을 개별 설정합니다. **브로커는 자동 설치·초기화 대상이지만, 전구 연결/등록은 아직 사용자 확인 단계**입니다.
+2. 관리형 Broker는 처음 시작할 때 인증 정보를 생성합니다. 기존 Mosquitto 리스너/브리지 또는 설정이 있다면 덮어쓰지 않고 실패합니다. 이 경우 기존 Broker를 별도로 설정한 뒤 `jarbis.broker.mode=external`을 사용하세요. **진단 중 기존 Mosquitto 설정이나 비밀번호 파일을 삭제하지 마세요.**
+3. 공유기 웹사이트에서 **기기 검색 → 기기 추가 → 전구 연결 설정** 순서로 진행합니다. 발견된 후보는 자동 등록되지 않습니다. 자동 연결은 등록된 Tasmota 전구, 확인된 HTTP 후보, 사용자의 승인을 요구합니다.
+4. 필요할 때만 상태를 새로 조회하고 전원을 제어합니다.
+
+   ```sh
+   ubus call jarbis devices_list '{}'
+   ubus call jarbis discovery_scan '{}'
+   ubus call jarbis discovery_list '{}'
+   ubus call jarbis light_set '{"id":"living_room","capability":"power","value":"ON"}'
+   ubus call jarbis light_state '{"id":"living_room"}'
+   ```
+
+   위 `living_room`은 **이미 등록된 기기 ID를 가정한 예시**입니다. 실제 ID는 `devices_list`를 확인하세요. `light_set`의 `accepted: true`는 브로커로 명령을 게시했다는 뜻으로, 실제 전구 동작 성공을 보장하지 않습니다. `light_state`의 `observed: false`도 오프라인 확정이 아니라 현재 상태 미확인을 의미합니다.
+
+5. 문제를 해결할 때는 먼저 다음 읽기 전용 명령으로 관리형 MQTT Broker의 사전 조건을 확인합니다.
+
+   ```sh
+   /usr/libexec/jarbis-broker diagnose
+   ```
+
+### MQTT 인증 정보와 통신 주의사항
+
+- 로컬 MQTT는 기본적으로 **1883/TCP, 암호화되지 않은 평문**입니다. 신뢰할 수 있는 내부망에서만 사용하고 WAN으로 포트 포워딩하지 마세요.
+- 관리형 Broker는 익명 접속을 차단하지만 현재 **전구들이 하나의 MQTT 계정을 공유**합니다. 기기별 계정·토픽 ACL은 아직 구현되지 않았습니다.
+- 비밀번호 파일 `/etc/jarbis/device-credentials`, `/etc/jarbis/mosquitto_pub`, `/etc/jarbis/mosquitto_sub`, `/etc/mosquitto/jarbis.passwd`는 민감 정보입니다. 공유기 백업에도 포함될 수 있습니다.
+- `broker_credentials` RPC는 **`jarbis` write ACL을 부여받은 세션에 MQTT 비밀번호(`secret`)를 반환**하며 RPC 내부에 별도 관리자 재인증은 없습니다. SmartSafeHub에서 관리자에게만 해당 권한을 부여해야 합니다. 일반 `status`, `devices_list`, `discovery_list`, `device_pair` 응답에는 비밀번호를 포함하지 않습니다. UI는 사용자 동작 없이 자동 호출하지 말고, 응답을 저장·캐시·로깅·원격 전송하지 않아야 합니다.
+- 전구 자동 연결(`device_pair`)의 관리자 비밀번호는 로컬 임시 파일 및 LAN HTTP POST 본문으로 전달됩니다. HTTP는 암호화되지 않으므로 격리되지 않은 네트워크에서 사용하지 마세요.
+
+보안 모델과 제한 사항은 [docs/SECURITY.md](docs/SECURITY.md), 취약점 비공개 신고 방법은 [SECURITY.md](SECURITY.md)를 참고하세요.
 
 ## 테스트
 
-ShellSpec 0.28.1을 설치한 환경에서 실행합니다. (`luci-app-smartsafehub`와 동일한 버전)
+CI는 ShellSpec `0.28.1`, Python 3 및 고정된 ucode 컴파일러를 사용합니다. 신규 테스트는 반드시 `spec/contracts_spec.sh`에 등록해야 합니다.
 
 ```sh
-shellspec                       # 모든 테스트 실행 (단일 진입점)
+sh tests/test-suite-integrity.sh  # 새 테스트가 CI에서 누락되는지 검사
+sh tests/test-openwrt-commands.sh # OpenWrt 25.12 BusyBox 명령 검사
+python3 tests/test-contract.py    # 정적 패키지 및 공개 준비 계약 검사
+shellspec                         # 전체 테스트 (ShellSpec 설치 필요)
 ```
 
-CI는 ShellSpec 및 ucode 설치에 앞서 `Verify all tests are included in CI`와 `Verify OpenWrt 25.12 BusyBox compatibility`를 먼저 실행합니다.
-별도의 모의 ucode 컴파일러로 ucode 문법 테스트 자체도 검증합니다. 별도의 전체 테스트 실행 스크립트는 사용하지 않습니다. ShellSpec 또는 Python 3가 없으면 전체 테스트가 실패하며, 누락된 테스트 스크립트가 있으면 실행 전에 실패합니다.
-로컬에 `ucode`가 없으면 셸·JSON·정적 계약 테스트만 실행합니다. CI에서는 `JARBIS_REQUIRE_UCODE=1`로 실제 ucode 컴파일과 UCI 모의 환경에서의 RPC 함수 실행을 필수로 검사합니다.
+CI에서는 `JARBIS_REQUIRE_UCODE=1`로 ucode 컴파일 및 RPC 런타임 테스트를 필수 실행합니다. CI 테스트는 실제 Tasmota/Mosquitto와 펌웨어 업그레이드 테스트를 대체하지 않습니다.
 
-새 회귀 테스트는 `tests/test-broker.sh`, `tests/test-discovery.sh`, `tests/test-rpc-runtime.sh`, `tests/test-package-contract.sh`, `tests/test-rpcd-reconcile.sh`, `tests/test-backup-restore.sh`, `tests/test-changelog-spacing.sh`이며 모두 ShellSpec에 직접 등록되어 있습니다. `test-backup-restore.sh`는 `keep.d`에 기록된 경로를 이용한 백업·복원 **모의 테스트**로, 실제 공유기 sysupgrade 검증을 대체하지는 않습니다.
+## 프로젝트 문서
 
-설치·업데이트 시 rpcd는 정상 reload를 우선 사용하며, `jarbis` ubus 객체가 누락된 경우에만 최후 수단으로 **한 번** restart합니다. 재시도 횟수는 제한하며 복구 실패 시 패키지 설치 스크립트가 실패를 알립니다. 이 동작은 공유기의 관리자 연결에 영향을 줄 수 있으므로 실제 기기에서 검증해야 합니다.
+- [아키텍처 및 RPC 계약](docs/ARCHITECTURE.md)
+- [SmartSafeHub 통합](docs/INTEGRATION.md)
+- [보안 설계와 제한](docs/SECURITY.md)
+- [비공개 취약점 신고](SECURITY.md)
+- [기여 및 개발 가이드](CONTRIBUTING.md)
+- [변경 내역](CHANGELOG.md)
 
-## 개발 원칙
-
-Jarbis의 기기 타입/Capability → 상태 이벤트 → 규칙 엔진 → Action Executor는 내부 계약으로 분리합니다. 향후 `jarbis-ai` 모듈도 동일한 검증된 Action Executor를 사용해야 합니다. SafeShield 및 SmartSafeHub의 핵심 네트워크/로그인 RPC에는 Jarbis 코드를 추가하지 않습니다.
-
-## Tasmota 자동 연결 (0.1.0-r7)
-
-공유기 웹사이트에서 발견한 Tasmota 전구를 **기기 추가**한 뒤 **자동 연결**을 누르면
-`device_pair` RPC가 다음 동작을 수행합니다.
-
-1. DHCP/HTTP 검색 캐시에서 승인된 기기의 IP·Topic을 확인하고 HTTP `Status 0`으로 기기 정보를 다시 검증합니다.
-2. Jarbis 관리형 Broker의 내부 인증 파일을 이용해 Tasmota MQTT 설정을 HTTP POST로 전달합니다.
-3. `Status 6`으로 설정 반영을 확인하고 MQTT `LWT Online` 수신 여부를 추가 확인합니다.
-
-브라우저에 MQTT 비밀번호를 반환하지 않고, CLI 인자/HTTP URL/로그에도 넣지 않습니다.
-Tasmota 관리 화면에 비밀번호가 있으면 사용자 입력이 필요하며, 해당 값은 저장하지 않습니다.
-다른 MQTT Broker가 등록된 전구는 **기존 연결 변경 승인**이 있어야 변경됩니다.
-
-`device_pair` 호출 예시 (이미 등록된 기기):
-
-```sh
-ubus call jarbis device_pair '{"id":"tasmota_tasmota_CB0735","admin_password":"","replace_existing":false}'
-```
-
-실제 기기 ID는 `ubus call jarbis devices_list '{}'` 결과를 확인하세요.
-`mqttConfirmed: false`는 설정 반영은 확인했지만 MQTT 온라인 응답을 아직 검증하지 못했다는 의미입니다.
-HTTP 통신은 로컬 LAN에서 암호화되지 않으므로 신뢰할 수 있는 네트워크에서만 사용하세요.
-
-
-## 실기기 상태 조회 및 RGB/CCT (0.1.0-r8)
-
-`ubus call jarbis light_state '{"id":"tasmota_tasmota_CB0735"}'`는 MQTT로 `Status 11`을 요청하고, 해당 전구의 `stat/<topic>/STATUS11` 응답이 도착한 경우에만 `observed: true`를 반환합니다. 응답이 없으면 `observed: false`이며 오프라인으로 단정하지 않습니다. 조회는 호출 시에만 실행되며 별도 상주 프로세스가 없습니다.
-
-RGB 색상은 `light_set`의 `capability=color`와 `RRGGBB` 형식의 값으로, 색온도는 `capability=color_temperature`와 Tasmota `CT` 값(153~500 mired)으로 전송합니다. 일부 전구에서는 해당 기능이 지원되지 않을 수 있습니다. 모든 제어 명령의 성공 응답은 MQTT 게시 성공일 뿐이며 실제 상태는 `light_state`에서 다시 확인해야 합니다.
+코드 및 문서의 변경은 GPL-3.0-or-later 조건으로 배포합니다. 외부 서비스·도구의 라이선스는 각 상위 프로젝트의 배포 조건을 따르며, 타사 소스나 자산을 이 저장소에 추가할 때는 해당 라이선스 전문·출처를 함께 보관해야 합니다.

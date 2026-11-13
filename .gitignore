@@ -82,6 +82,23 @@ dist/
 .shellspec-quick.log
 report/
 
+# Never commit local deployment credentials, router backups or private settings.
+.env
+.env.*
+!.env.example
+/etc/jarbis/
+/etc/mosquitto/jarbis.passwd
+**/device-credentials
+**/mosquitto_pub
+**/mosquitto_sub
+*.key
+*.pem
+*.p12
+*.pfx
+*.backup
+*.tar.gz
+*.tgz
+
 # etc
 *.orig
 *.rej

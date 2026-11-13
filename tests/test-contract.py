@@ -181,7 +181,7 @@ class ProjectContracts(unittest.TestCase):
         mk = (ROOT / 'Makefile').read_text()
         cli = (ROOT / 'root/usr/libexec/jarbis-pair').read_text()
         rpc = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
-        self.assertIn('PKG_RELEASE:=10', mk)
+        self.assertIn('PKG_RELEASE:=11', mk)
         self.assertIn('./root/usr/libexec/jarbis-pair', mk)
         self.assertIn('export function device_pair(', rpc)
         self.assertIn("mkdtemp('/tmp/jarbis-pair-XXXXXX')", rpc)
