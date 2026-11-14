@@ -4,7 +4,7 @@
 set -eu
 umask 077
 UCI_BIN="${JARBIS_UCI_BIN:-uci}"
-FETCH_BIN="${JARBIS_FETCH_BIN:-uclient-fetch}"
+HTTP_BIN="${JARBIS_CURL_BIN:-curl}"
 SUB_BIN="${JARBIS_MQTT_SUB_BIN:-mosquitto_sub}"
 LEASES="${JARBIS_LEASES:-/tmp/dhcp.leases}"
 CACHE="${JARBIS_DISCOVERY_CACHE:-/tmp/jarbis-discovery.records}"
@@ -81,7 +81,12 @@ if [ -n "$prefix" ] && [ -f "$LEASES" ]; then
                 fi
                 ;;
         esac
-        if "$FETCH_BIN" -q -T "$timeout" -O - "http://$ip/cm?cmnd=Status%200" 2>/dev/null | head -c 4096 > "$TMP/http"; then
+        # No redirects or proxies: a DHCP lease must not cause a second
+        # request to a different host. Limit response size before parsing.
+        if "$HTTP_BIN" --disable --fail --silent --show-error --location --max-redirs 0 \
+            --noproxy '*' --proto '=http' --connect-timeout "$timeout" \
+            --max-time "$timeout" --max-filesize 4096 --output "$TMP/http" \
+            "http://$ip/cm?cmnd=Status%200" >/dev/null 2>&1; then
             version="$(jsonfilter -i "$TMP/http" -e '@.StatusFWR.Version' 2>/dev/null || :)"
             # Tasmota Status 0 contains the MQTT topic under Status.Topic;
             # do not rely on the firmware version containing 'tasmota'.

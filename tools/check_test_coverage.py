@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Fail before dependencies are installed if any Jarbis test is not run by CI.
 
 ShellSpec automatically discovers *_spec.sh; each test in tests/ must be

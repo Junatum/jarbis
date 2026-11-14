@@ -44,7 +44,7 @@ for path, command in paths.items():
     require((root / path).is_file(), path + ' missing')
     require(re.search(r'(?m)^\s*\$\(' + command + r'\)\s+\./' + re.escape(path) + r'\s+', mk), path + ' install action')
 require('IPKG_INSTROOT' in mk and '/bin/sh /usr/libexec/jarbis-rpcd-reconcile' in mk, 'postinst runtime reconcilation')
-require('DEPENDS:=+rpcd-mod-ucode +ucode-mod-uci +ucode-mod-fs +mosquitto-client-ssl +mosquitto-ssl +uclient-fetch +jsonfilter' in mk, 'declared runtime dependencies')
+require('DEPENDS:=+rpcd-mod-ucode +ucode-mod-uci +ucode-mod-fs +mosquitto-client-ssl +mosquitto-ssl +curl +jsonfilter' in mk, 'declared runtime dependencies')
 require('PKG_LICENSE:=GPL-3.0-or-later' in mk, 'license')
 acl = json.loads((root / 'root/usr/share/rpcd/acl.d/jarbis.json').read_text())
 source = (root / 'root/usr/share/rpcd/ucode/jarbis.uc').read_text()

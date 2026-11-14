@@ -4,10 +4,10 @@
 
 SmartSafeHub용 **OpenWrt 경량 로컬 스마트홈 엔진**입니다. 현재 Tasmota Wi-Fi 전구의 검색·등록·연결·전원·밝기·RGB 색상·색온도 제어를 지원합니다. 이름은 대중문화 속 J.A.R.V.I.S.에서 착안한 비공식 명칭이며 Marvel과 관련이 없습니다.
 
-- **패키지 버전:** `0.1.0-r11` (기능 버전 `0.1.0`, OpenWrt 패키지 revision `11`)
+- **패키지 버전:** `0.1.0-r12` (기능 버전 `0.1.0`, OpenWrt 패키지 revision `11`)
 - **라이선스:** `GPL-3.0-or-later` ([LICENSE](LICENSE))
 - **플랫폼:** OpenWrt 25.12 기반 SmartSafeHub. 모델별 설치 용량·RAM·MQTT 의존성 검증 필요
-- **런타임:** BusyBox ash, UCI, rpcd-ucode, Mosquitto, uclient-fetch, jsonfilter. Python, Node.js, 상주 AI 서비스는 불필요
+- **런타임:** BusyBox ash, UCI, rpcd-ucode, Mosquitto, curl, jsonfilter. Python, Node.js, 상주 AI 서비스는 불필요
 - **상태:** 초기 개발 버전. 일반 사용자용 배포 전 실기기 검증이 필요합니다
 
 ## 기능과 제한 사항
@@ -35,7 +35,7 @@ make menuconfig               # Utilities > jarbis 선택
 make package/jarbis/compile V=s
 ```
 
-`Makefile`은 `rpcd-mod-ucode`, `ucode-mod-uci`, `ucode-mod-fs`, `mosquitto-ssl`, `mosquitto-client-ssl`, `uclient-fetch`, `jsonfilter`를 의존성으로 선언합니다. 관리형 Broker 초기화에는 `mosquitto_passwd` 실행 파일도 필요합니다. OpenWrt 빌드 설정에서 `CONFIG_MOSQUITTO_PASSWD=y` 제공 여부를 확인하세요.
+`Makefile`은 `rpcd-mod-ucode`, `ucode-mod-uci`, `ucode-mod-fs`, `mosquitto-ssl`, `mosquitto-client-ssl`, `curl`, `jsonfilter`를 의존성으로 선언합니다. 관리형 Broker 초기화에는 `mosquitto_passwd` 실행 파일도 필요합니다. `Build/Compile`은 `CONFIG_MOSQUITTO_PASSWD=y`가 아니면 실패합니다. 배포 패키지에 실제 바이너리가 들어 있는지도 릴리스 전에 확인해야 합니다. `curl` 추가로 특히 소형 공유기의 설치 용량 및 의존성을 재검증하세요.
 
 설치 후 Jarbis는 **비활성화** 상태입니다. 앱의 설치·업데이트·복원은 SmartSafeHub Apps 배포 정책에 따라 별도로 승인·검증해야 합니다. 특히 소형 장치에서는 펌웨어 크기, 사용 가능 저장공간과 메모리를 실측해야 합니다.
 
@@ -78,7 +78,7 @@ make package/jarbis/compile V=s
 - 관리형 Broker는 익명 접속을 차단하지만 현재 **전구들이 하나의 MQTT 계정을 공유**합니다. 기기별 계정·토픽 ACL은 아직 구현되지 않았습니다.
 - 비밀번호 파일 `/etc/jarbis/device-credentials`, `/etc/jarbis/mosquitto_pub`, `/etc/jarbis/mosquitto_sub`, `/etc/mosquitto/jarbis.passwd`는 민감 정보입니다. 공유기 백업에도 포함될 수 있습니다.
 - `broker_credentials` RPC는 **`jarbis` write ACL을 부여받은 세션에 MQTT 비밀번호(`secret`)를 반환**하며 RPC 내부에 별도 관리자 재인증은 없습니다. SmartSafeHub에서 관리자에게만 해당 권한을 부여해야 합니다. 일반 `status`, `devices_list`, `discovery_list`, `device_pair` 응답에는 비밀번호를 포함하지 않습니다. UI는 사용자 동작 없이 자동 호출하지 말고, 응답을 저장·캐시·로깅·원격 전송하지 않아야 합니다.
-- 전구 자동 연결(`device_pair`)의 관리자 비밀번호는 로컬 임시 파일 및 LAN HTTP POST 본문으로 전달됩니다. HTTP는 암호화되지 않으므로 격리되지 않은 네트워크에서 사용하지 마세요.
+- 전구 검색·상태 조회·자동 연결은 HTTP 3xx 리다이렉트를 거부합니다(`curl --location --max-redirs 0`). 자동 연결(`device_pair`)의 관리자 비밀번호는 로컬 임시 파일 및 LAN HTTP POST 본문으로 전달됩니다. HTTP는 암호화되지 않으므로 격리되지 않은 네트워크에서 사용하지 마세요.
 
 보안 모델과 제한 사항은 [docs/SECURITY.md](docs/SECURITY.md), 취약점 비공개 신고 방법은 [SECURITY.md](SECURITY.md)를 참고하세요.
 

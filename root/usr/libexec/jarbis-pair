@@ -5,7 +5,7 @@
 set -eu
 umask 077
 UCI_BIN="${JARBIS_UCI_BIN:-uci}"
-FETCH_BIN="${JARBIS_FETCH_BIN:-uclient-fetch}"
+HTTP_BIN="${JARBIS_CURL_BIN:-curl}"
 JSON_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
 SUB_BIN="${JARBIS_MQTT_SUB_BIN:-mosquitto_sub}"
 BROKER_BIN="${JARBIS_BROKER_BIN:-/usr/libexec/jarbis-broker}"
@@ -84,7 +84,7 @@ USER=''; SECRET=''
 case "$passline" in password=*) SECRET="${passline#password=}" ;; *) fail BROKER_UNAVAILABLE ;; esac
 [ "${#SECRET}" -eq 64 ] && [ "$(printf '%s' "$SECRET" | tr -cd 'a-f0-9')" = "$SECRET" ] || fail BROKER_UNAVAILABLE
 [ -f "$CACHE" ] || fail DEVICE_NOT_FOUND
-command -v "$FETCH_BIN" >/dev/null 2>&1 || fail HTTP_UNAVAILABLE
+command -v "$HTTP_BIN" >/dev/null 2>&1 || fail HTTP_UNAVAILABLE
 command -v "$JSON_BIN" >/dev/null 2>&1 || fail HTTP_UNAVAILABLE
 # Form encoding uses stdin, never awk -v with a secret value in argv.
 urlencode() {
@@ -97,8 +97,13 @@ http_command() {
     { printf 'cmnd='; urlencode "$command";
       if [ -n "$WEB_PASSWORD" ]; then printf '&user=admin&password='; urlencode "$WEB_PASSWORD"; fi
     } > "$DIR/form"
-    # No HTTP proxy, no DNS, fixed IP and path. No URLs or secrets in argv.
-    "$FETCH_BIN" -q -Y off -T 3 --post-file="$DIR/form" -O "$DIR/response" "http://$IP/cm" 2>/dev/null || return 1
+    # Explicitly refuse even same-host redirects: credentials must never be
+    # replayed to a Location target. Only the fixed literal IPv4 may be used.
+    "$HTTP_BIN" --disable --fail --silent --show-error --location --max-redirs 0 \
+        --noproxy '*' --proto '=http' --connect-timeout 2 --max-time 3 \
+        --max-filesize 8192 --output "$DIR/response" \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary "@$DIR/form" "http://$IP/cm" 2>/dev/null || return 1
     [ -s "$DIR/response" ] || return 1
     [ "$(wc -c < "$DIR/response")" -le 8192 ] || return 1
 }

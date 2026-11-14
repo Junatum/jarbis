@@ -3,6 +3,7 @@
 """Pure standard library static tests for package/ACL/forward compatibility."""
 import json
 import pathlib
+import re
 import sys
 import unittest
 
@@ -132,7 +133,7 @@ class ProjectContracts(unittest.TestCase):
         self.assertIn('"$reported_topic" = "$topic"', helper)
         self.assertIn('valid_ip "$lan" && valid_ip "$ip"', helper)
         self.assertIn('"http://$target/cm?cmnd=Status%200"', helper)
-        self.assertIn('"$FETCH_BIN" -q -Y off -T 3', helper)
+        self.assertIn('--location --max-redirs 0', helper)
         self.assertNotIn('password=', helper)
         self.assertIn("source: source == 'mqtt' || source == 'http'", core)
 
@@ -163,7 +164,7 @@ class ProjectContracts(unittest.TestCase):
         config = (ROOT / '.shellspec').read_text()
         self.assertIn('--shell sh', config)
         spec = (ROOT / 'spec/contracts_spec.sh').read_text()
-        for name in ['test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh', 'test-openwrt-commands.sh', 'test-rpc-runtime.sh', 'test-package-contract.sh', 'test-rpcd-reconcile.sh', 'test-backup-restore.sh', 'test-changelog-spacing.sh', 'test-broker.sh', 'test-discovery.sh', 'test-manage.sh', 'test-pair.sh']:
+        for name in ['test-http-redirect.py', 'test-mosquitto-build.sh', 'test-mqtt.sh', 'test-contract.py', 'test-ucode.sh', 'test-ucode-runner.sh', 'test-suite-integrity.sh', 'test-openwrt-commands.sh', 'test-rpc-runtime.sh', 'test-package-contract.sh', 'test-rpcd-reconcile.sh', 'test-backup-restore.sh', 'test-changelog-spacing.sh', 'test-broker.sh', 'test-discovery.sh', 'test-manage.sh', 'test-pair.sh']:
             self.assertIn('tests/' + name, spec)
         self.assertFalse((ROOT / 'tests/run.sh').exists())
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
@@ -181,13 +182,14 @@ class ProjectContracts(unittest.TestCase):
         mk = (ROOT / 'Makefile').read_text()
         cli = (ROOT / 'root/usr/libexec/jarbis-pair').read_text()
         rpc = (ROOT / 'root/usr/share/rpcd/ucode/jarbis/core.uc').read_text()
-        self.assertIn('PKG_RELEASE:=11', mk)
+        self.assertRegex(mk, r'(?m)^PKG_RELEASE:=[1-9][0-9]*$')
         self.assertIn('./root/usr/libexec/jarbis-pair', mk)
         self.assertIn('export function device_pair(', rpc)
         self.assertIn("mkdtemp('/tmp/jarbis-pair-XXXXXX')", rpc)
         self.assertIn("'wx', 0o600", rpc)
         self.assertIn('device_pair', (ROOT / 'root/usr/share/rpcd/ucode/jarbis.uc').read_text())
-        self.assertIn('--post-file=', cli)
+        self.assertIn('--data-binary', cli)
+        self.assertIn('--location --max-redirs 0', cli)
         self.assertIn('BROKER_CONFLICT', cli)
         self.assertIn('WEB_AUTH_REQUIRED', cli)
         self.assertNotIn('eval ', cli)
@@ -218,6 +220,56 @@ class ProjectContracts(unittest.TestCase):
                         ci.index('name: Install pinned ucode compiler'))
         self.assertTrue((ROOT / 'tools/check_openwrt_commands.py').is_file())
         self.assertTrue((ROOT / 'tools/openwrt-25.12-commands.txt').is_file())
+
+    def test_공개_라이선스_내용과_패키지_revision을_확인한다(self):
+        mk = (ROOT / 'Makefile').read_text()
+        lic = (ROOT / 'LICENSE').read_text()
+        self.assertIn('GNU GENERAL PUBLIC LICENSE', lic)
+        self.assertIn('Version 3, 29 June 2007', lic)
+        rev = re.search(r'(?m)^PKG_RELEASE:=(\d+)$', mk)
+        self.assertIsNotNone(rev)
+        label = f'0.1.0-r{rev.group(1)}'
+        for doc in ['README.md', 'docs/ARCHITECTURE.md', 'docs/SECURITY.md']:
+            with self.subTest(doc=doc):
+                self.assertIn(label, (ROOT / doc).read_text())
+        self.assertIn(f'## [{label}]', (ROOT / 'CHANGELOG.md').read_text())
+
+    def test_공개_문서와_민감정보_무시_정책을_검증한다(self):
+        self.assertFalse((ROOT / 'docs/PUBLIC_RELEASE.md').exists())
+        for name in ['README.md', 'docs/INTEGRATION.md', 'CONTRIBUTING.md', 'SECURITY.md']:
+            content = (ROOT / name).read_text()
+            self.assertNotIn('PUBLIC_RELEASE.md', content)
+        security = (ROOT / 'SECURITY.md').read_text()
+        self.assertTrue('취약점' in security or 'vulnerability' in security.lower())
+        ignores = (ROOT / '.gitignore').read_text()
+        for path in ['.env', '*.key', 'device-credentials', 'mosquitto_pub', 'mosquitto_sub']:
+            self.assertIn(path, ignores)
+
+    def test_SPDX_헤더를_파이썬_도구와_셸_스크립트에_적용한다(self):
+        for path in [ROOT / 'tools/check_openwrt_commands.py', ROOT / 'tools/check_test_coverage.py']:
+            self.assertTrue(any('SPDX-License-Identifier: GPL-3.0-or-later' in line for line in path.read_text().splitlines()[:4]))
+
+    def test_HTTP_리다이렉트와_프록시를_기본적으로_차단한다(self):
+        mk = (ROOT / 'Makefile').read_text()
+        self.assertIn('+curl', mk)
+        for name in ['jarbis-pair', 'jarbis-state', 'jarbis-discover']:
+            code = (ROOT / 'root/usr/libexec' / name).read_text()
+            with self.subTest(name=name):
+                self.assertIn('--disable --fail', code)
+                self.assertIn('--location --max-redirs 0', code)
+                self.assertIn("--noproxy '*'", code)
+                self.assertIn("--proto '=http'", code)
+                self.assertIn('--max-time', code)
+                self.assertNotIn('uclient-fetch', code)
+
+    def test_Mosquitto_빌드_게이트와_외부_Broker_검사를_유지한다(self):
+        mk = (ROOT / 'Makefile').read_text()
+        broker = (ROOT / 'root/usr/libexec/jarbis-broker').read_text()
+        self.assertIn('CONFIG_MOSQUITTO_PASSWD', mk)
+        self.assertIn('external MQTT client config must be mode 0600', broker)
+        self.assertIn('"$0" check', broker)
+        spec = (ROOT / 'spec/contracts_spec.sh').read_text()
+        self.assertIn('tests/test-mosquitto-build.sh', spec)
 
 
 if __name__ == '__main__':

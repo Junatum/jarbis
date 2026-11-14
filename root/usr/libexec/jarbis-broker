@@ -16,7 +16,12 @@ fail() { printf 'jarbis-broker: %s\n' "$1" >&2; exit 1; }
 get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
 [ "$#" -eq 1 ] || fail 'usage: jarbis-broker setup|start|status|check|diagnose'
 case "$1" in setup|start|status|check|diagnose) action="$1" ;; *) fail 'invalid action' ;; esac
-[ "$(get jarbis.broker.mode)" = managed ] || { [ "$action" = status ] && exit 0; fail 'broker is external'; }
+mode="$(get jarbis.broker.mode)"
+case "$mode" in managed|external) ;; *) fail 'invalid broker mode' ;; esac
+# Never provision/restart or diagnose a broker that Jarbis does not own.
+if [ "$mode" = external ]; then
+    case "$action" in check|status) ;; *) fail 'broker is external';; esac
+fi
 [ "${JARBIS_TEST_MODE:-}" = 1 ] || [ "$SECRET_DIR" = /etc/jarbis ] || fail 'invalid secret directory'
 [ "${JARBIS_TEST_MODE:-}" = 1 ] || [ "$BROKER_PASS" = /etc/mosquitto/jarbis.passwd ] || fail 'invalid password path'
 if [ "$action" = check ]; then
@@ -25,8 +30,15 @@ if [ "$action" = check ]; then
     case "$host" in ''|-*|*[!a-zA-Z0-9.:_-]*) fail 'invalid host' ;; esac
     case "$port" in ''|*[!0-9]*) fail 'invalid port' ;; esac
     [ "$port" -ge 1 ] 2>/dev/null && [ "$port" -le 65535 ] 2>/dev/null || fail 'invalid port'
-    if [ "$(get jarbis.broker.mode)" = managed ]; then
+    if [ "$mode" = managed ]; then
         [ "$(get jarbis.broker.managed_ready)" = 1 ] && [ -s "$SECRET_DIR/mosquitto_pub" ] || fail 'broker not ready'
+    else
+        # External credentials are explicitly provisioned by the user.
+        # Never fall back to unauthenticated broker probing or alter UCI.
+        [ -f "$SECRET_DIR/mosquitto_pub" ] && [ ! -L "$SECRET_DIR/mosquitto_pub" ] &&
+        [ -s "$SECRET_DIR/mosquitto_pub" ] || fail 'external MQTT client config missing'
+        mode_bits="$(LC_ALL=C ls -ld "$SECRET_DIR/mosquitto_pub" 2>/dev/null | cut -c 1-10)"
+        [ "$mode_bits" = '-rw-------' ] || fail 'external MQTT client config must be mode 0600'
     fi
     command -v "$MQTT_PUB_BIN" >/dev/null 2>&1 || fail 'mosquitto_pub missing'
     # mosquitto_pub does not provide mosquitto_sub's -W wait option on the
@@ -39,6 +51,11 @@ if [ "$action" = check ]; then
     exit 0
 fi
 if [ "$action" = status ]; then
+    if [ "$mode" = external ]; then
+        # Status is not a managed marker; confirm the actual connection.
+        "$0" check
+        exit $?
+    fi
     [ "$(get jarbis.broker.managed_ready)" = 1 ] && [ -s "$BROKER_PASS" ] && [ -s "$SECRET_DIR/device-credentials" ]
     exit $?
 fi

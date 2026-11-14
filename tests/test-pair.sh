@@ -33,19 +33,27 @@ MOCK
 cat > "$TMP/bin/fetch" <<'MOCK'
 #!/bin/sh
 set -eu
-form=''; out=''; url=''
+form=''; out=''; url=''; redirects=0; location=0; noproxy=0
+args="$*"
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --post-file=*) form="${1#--post-file=}" ;;
-        -O) shift; out="$1" ;;
+        --data-binary) shift; form="${1#@}" ;;
+        --output) shift; out="$1" ;;
+        --location) location=1 ;;
+        --max-redirs) shift; [ "$1" = 0 ] || exit 9; redirects=1 ;;
+        --noproxy) shift; [ "$1" = '*' ] || exit 9; noproxy=1 ;;
         http://*) url="$1" ;;
     esac
     shift
 done
+[ "$location" = 1 ] && [ "$redirects" = 1 ] && [ "$noproxy" = 1 ] || exit 9
+printf '%s\n' "$args" >> "$TEST_DIR/http-argv"
+# Mocked 302: curl must fail without following a Location and leaking POST data.
+[ "${MOCK_REDIRECT:-0}" != 1 ] || exit 47
 [ "$url" = http://192.168.1.172/cm ] || exit 1
 [ -s "$form" ] || exit 1
 # Never pass secrets to the HTTP client argv / URL.
-case "$* $url $out" in *0123456789abcdef*) exit 1 ;; esac
+case "$args $url $out" in *0123456789abcdef*) exit 1 ;; esac
 if grep -q 'cmnd=Status%200' "$form"; then
     if [ "${WEB_AUTH_FAIL:-0}" = 1 ]; then
         printf '<html>Login required</html>' > "$out"
@@ -90,7 +98,7 @@ printf 'Online\n'
 MOCK
 chmod +x "$TMP/bin/"*
 export JARBIS_UCI_BIN="$TMP/bin/uci" JARBIS_BROKER_BIN="$TMP/bin/broker"
-export JARBIS_FETCH_BIN="$TMP/bin/fetch" JARBIS_JSONFILTER_BIN="$TMP/bin/jsonfilter"
+export JARBIS_CURL_BIN="$TMP/bin/fetch" JARBIS_JSONFILTER_BIN="$TMP/bin/jsonfilter"
 export JARBIS_MQTT_SUB_BIN="$TMP/bin/mosquitto_sub"
 export JARBIS_DEVICE_CREDENTIALS="$TMP/credentials" JARBIS_DISCOVERY_CACHE="$TMP/discovery"
 printf "%s\n" "-u jarbis" > "$TMP/mosquitto_sub"
@@ -108,6 +116,14 @@ make_request tasmota_CB0735 '' 0
 [ -s "$TMP/sent-body" ] || fail 'HTTP POST body not sent'
 ! grep -F '0123456789abcdef' "$CASE_DIR/result" >/dev/null || fail 'secret in output'
 cleanup_request
+# Reject a device attempting to redirect the POST (including broker secret).
+export MOCK_REDIRECT=1
+make_request tasmota_CB0735 '' 0
+if "$TARGET" "$CASE_DIR"; then fail 'HTTP 302 redirect accepted'; fi
+[ "$(cat "$CASE_DIR/result")" = HTTP_UNAVAILABLE ] || fail 'redirect failure code'
+cleanup_request
+unset MOCK_REDIRECT
+! grep -F "$SECRET" "$TMP/http-argv" >/dev/null || fail 'credential appeared in curl argv'
 # If mosquitto_sub lacks -W, do not hang; preserve HTTP-configured status.
 export SUB_NO_WAIT=1
 make_request tasmota_CB0735 '' 0

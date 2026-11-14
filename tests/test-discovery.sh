@@ -18,12 +18,23 @@ case "$3" in
  *) exit 1 ;;
 esac
 MOCK
-cat > "$TMP/bin/uclient-fetch" <<'MOCK'
+cat > "$TMP/bin/curl" <<'MOCK'
 #!/bin/sh
-printf '%s\n' "$*" >> "$HTTP_LOG"
-case "$*" in
- *192.168.1.172*) printf '%s\n' '{"Status":{"DeviceName":"AiYaTo-RGBCW","Topic":"tasmota_CB0735"},"StatusFWR":{"Version":"16.0.0(release-zbbridge)"},"StatusMQT":{"MqttHost":"192.168.1.1"}}' ;;
- *) printf '%s\n' '{"StatusFWR":{"Version":"unknown"}}' ;;
+args="$*"; out=''; location=0; redirects=1
+printf '%s\n' "$args" >> "$HTTP_LOG"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output) shift; out="$1" ;;
+        --location) location=1 ;;
+        --max-redirs) shift; redirects="$1" ;;
+    esac
+    shift
+done
+[ "$location" = 1 ] && [ "$redirects" = 0 ] || exit 7
+[ "${MOCK_REDIRECT:-0}" != 1 ] || exit 47
+case "$args" in
+ *192.168.1.172*) printf '%s\n' '{"Status":{"DeviceName":"AiYaTo-RGBCW","Topic":"tasmota_CB0735"},"StatusFWR":{"Version":"16.0.0(release-zbbridge)"},"StatusMQT":{"MqttHost":"192.168.1.1"}}' > "$out" ;;
+ *) printf '%s\n' '{"StatusFWR":{"Version":"unknown"}}' > "$out" ;;
 esac
 MOCK
 cat > "$TMP/bin/jsonfilter" <<'MOCK'
@@ -73,10 +84,18 @@ for n in 172 175 176 177 178 179 180 181 182 183 184 185 186 187 188 189 190 191
     printf '0 40:f5:20:cb:07:35 192.168.1.%s host *\n' "$n"
 done > "$TMP/leases"
 printf '0 aa:bb:cc:dd:ee:ff 10.0.0.4 bad *\n' >> "$TMP/leases"
-export HTTP_LOG="$TMP/http-log" JARBIS_TEST_MODE=1 JARBIS_UCI_BIN="$TMP/bin/uci" JARBIS_FETCH_BIN="$TMP/bin/uclient-fetch" JARBIS_MQTT_SUB_BIN="$TMP/bin/mosquitto_sub" JARBIS_LEASES="$TMP/leases" JARBIS_DISCOVERY_CACHE="$TMP/cache" JARBIS_MQTT_CONFIG_DIR="$TMP/auth"
+export HTTP_LOG="$TMP/http-log" JARBIS_TEST_MODE=1 JARBIS_UCI_BIN="$TMP/bin/uci" JARBIS_CURL_BIN="$TMP/bin/curl" JARBIS_MQTT_SUB_BIN="$TMP/bin/mosquitto_sub" JARBIS_LEASES="$TMP/leases" JARBIS_DISCOVERY_CACHE="$TMP/cache" JARBIS_MQTT_CONFIG_DIR="$TMP/auth"
 PATH="$TMP/bin:$PATH"; export PATH
 sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail '자동 검색 실패'
 [ "$(wc -l < "$TMP/http-log")" -eq 16 ] || fail 'HTTP 요청 수 제한 위반'
+# Mocked 302 must not create a false discovery candidate.
+MOCK_REDIRECT=1; export MOCK_REDIRECT
+: > "$TMP/http-log"
+sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail 'redirect response caused discovery failure'
+! grep -F 'http|' "$TMP/cache" >/dev/null || fail 'redirect response accepted as HTTP discovery'
+unset MOCK_REDIRECT
+: > "$TMP/http-log"
+sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail 'restoring normal discovery after redirect failed'
 grep -Fx 'http|192.168.1.172|40:f5:20:cb:07:35|tasmota_CB0735|AiYaTo-RGBCW' "$TMP/cache" >/dev/null || fail 'HTTP Tasmota 식별 실패'
 grep -Fx 'mqtt|192.168.1.172|40:F5:20:CB:07:35|aiyato_cb0735|AiYaTo' "$TMP/cache" >/dev/null || fail 'MQTT retained discovery 실패'
 ! grep -F 'wrongtopic' "$TMP/cache" >/dev/null || fail '비표준 FullTopic 허용'

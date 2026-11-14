@@ -13,7 +13,7 @@ Jarbis는 OpenWrt 패키지의 **독립 rpcd `jarbis` 객체**를 제공합니�
 1. **미설치**: 승인된 Apps 설치 상태에서 `jarbis` 패키지가 없음이 확인되었을 때만 설치 안내
 2. **설치되었으나 RPC 없음**: `jarbis` ubus 객체 오류는 무조건 미설치로 해석하지 말고 rpcd 등록/ACL/재시작 문제로 분리
 3. **설치됨·비활성화**: `status.data.enabled=false`이면 활성화 안내
-4. **활성화됨·Broker 미준비**: `status.data.brokerReady=false`이면 진단 안내. 외부 Broker 모드는 별도 운영 상태를 확인
+4. **활성화됨·Broker 미준비**: `status.data.brokerReady=false`이면 진단 안내. 외부 Broker는 `/etc/jarbis/mosquitto_pub` (0600)에 사용자 구성이 있어야 게시 기반 연결 검사를 통과
 5. **활성화됨·Broker 준비**: 등록된 기기를 조회하고 필요한 경우 검색·연결 유도
 
 라우팅은 해당 SmartSafeHub 앱의 실제 경로/해시 설정을 기준으로 하며, 실행 경로를 임의 생성하거나 인증되지 않은 외부 URL로 이동시키지 않습니다. 패키지 설치 권한과 Jarbis RPC 권한은 분리하여 관리합니다.
@@ -37,7 +37,7 @@ ubus call jarbis status '{}'
 /usr/libexec/jarbis-broker diagnose
 ```
 
-`diagnose`는 **관리형 Broker** 사전 조건을 읽기 전용으로 검사합니다. 관리형 충돌이 발생해도 기존 Mosquitto 파일/UCI 설정, 인증 파일을 삭제하거나 덮어쓰지 마세요. 기존 Broker 사용자는 `external` 모드로 연결해야 합니다.
+`diagnose`는 **관리형 Broker** 사전 조건을 읽기 전용으로 검사합니다. 관리형 충돌이 발생해도 기존 Mosquitto 파일/UCI 설정, 인증 파일을 삭제하거나 덮어쓰지 마세요. 기존 Broker 사용자는 `external` 모드로 연결해야 합니다. 외부 Broker의 `brokerReady`는 `mosquitto_pub` QoS 1 게시가 허용된 경우에만 `true`입니다. 외부 Broker 자동 연결(`device_pair`)은 지원하지 않습니다.
 
 설치·업데이트 시 `jarbis-rpcd-reconcile`은 reload로 객체 등록을 확인한 뒤 필요한 경우에 한해 rpcd restart를 시도합니다. 이 작업은 관리 세션에 영향을 줄 수 있으므로 실제 기기 테스트가 필요합니다.
 

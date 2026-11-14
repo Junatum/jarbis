@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=jarbis
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=11
+PKG_RELEASE:=12
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=SmartSafeHub Contributors
@@ -17,7 +17,7 @@ define Package/jarbis
   CATEGORY:=Utilities
   TITLE:=Jarbis - SmartSafeHub home automation core
   URL:=https://github.com/Junatum/jarbis
-  DEPENDS:=+rpcd-mod-ucode +ucode-mod-uci +ucode-mod-fs +mosquitto-client-ssl +mosquitto-ssl +uclient-fetch +jsonfilter
+  DEPENDS:=+rpcd-mod-ucode +ucode-mod-uci +ucode-mod-fs +mosquitto-client-ssl +mosquitto-ssl +curl +jsonfilter
 endef
 
 define Package/jarbis/description
@@ -38,7 +38,13 @@ define Build/Prepare
 	$(CP) ./LICENSE $(PKG_BUILD_DIR)/LICENSE
 endef
 
+# Upstream OpenWrt can omit the password generator despite mosquitto-ssl.
+# Refuse a firmware/package build that cannot initialize the managed broker.
 define Build/Compile
+	@if [ "$(CONFIG_MOSQUITTO_PASSWD)" != "y" ]; then \
+		echo "Jarbis: CONFIG_MOSQUITTO_PASSWD=y is required (mosquitto-ssl)" >&2; \
+		exit 1; \
+	fi
 endef
 
 define Package/jarbis/install

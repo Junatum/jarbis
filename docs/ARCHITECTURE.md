@@ -1,6 +1,6 @@
 # Jarbis 아키텍처 및 RPC v1
 
-현재 기준: `0.1.0-r11`. 이 문서는 구현된 기능만 설명하며 Scene/규칙 엔진/AI는 설계 계획입니다.
+현재 기준: `0.1.0-r12`. 이 문서는 구현된 기능만 설명하며 Scene/규칙 엔진/AI는 설계 계획입니다.
 
 ```text
 SmartSafeHub 공유기 웹사이트 (인증된 LuCI 세션)
@@ -23,7 +23,7 @@ SmartSafeHub 공유기 웹사이트 (인증된 LuCI 세션)
 ```
 
 - **기본 비활성화:** 사용자가 활성화할 때만 관리형 Broker를 준비합니다. Jarbis 자체의 상주 폴링 데몬은 없습니다.
-- **Broker:** 기존 Mosquitto의 커스텀 설정을 덮어쓰지 않습니다. 관리형은 127.0.0.1과 LAN IP의 인증형 1883/TCP 리스너를 사용하고 방화벽/WAN 설정은 변경하지 않습니다. 외부 Broker 모드는 기존 Broker를 사용합니다.
+- **Broker:** 기존 Mosquitto의 커스텀 설정을 덮어쓰지 않습니다. 관리형은 127.0.0.1과 LAN IP의 인증형 1883/TCP 리스너를 사용하고 방화벽/WAN 설정은 변경하지 않습니다. 외부 Broker 모드는 기존 Broker를 사용하며, `brokerReady`는 제공된 0600 client config로 QoS 1 게시를 확인합니다. 외부 Broker에 새 설정을 작성하지 않습니다.
 - **Discovery:** DHCP 리스의 `/24` LAN 후보 HTTP 최대 16대, MQTT retained 후보 수집을 제한된 시간/크기로 수행합니다. 결과는 `/tmp/jarbis-discovery.records`에만 저장합니다. 검색은 등록이나 접근 권한 부여가 아닙니다.
 - **Device:** UCI의 `config device`로 승인 등록된 `kind=light`, `protocol=tasmota` 기기만 제어 가능합니다. 표준 Tasmota FullTopic `%prefix%/%topic%/`을 가정합니다.
 - **상태:** `jarbis-state`는 등록 기기를 검증한 뒤 확인된 HTTP 후보를 먼저 조회하고 실패 시 MQTT 응답을 시도합니다. 유효한 기기 응답이 없으면 `observed:false`로 반환합니다.

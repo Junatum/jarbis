@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Conservative shell command audit for stock OpenWrt 25.12 router images.
 
 Checks all shipped shell entry points, with a pinned BusyBox applet allowlist

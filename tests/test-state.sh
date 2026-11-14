@@ -47,14 +47,21 @@ MOCK
 cat > "$TMP/fetch" <<'MOCK'
 #!/bin/sh
 [ "${MOCK_HTTP_FAILED:-0}" != 1 ] || exit 1
+have_location=0; maxredirs=1; dest=''
 while [ "$#" -gt 0 ]; do
-  case "$1" in -O) shift; dest="$1" ;; esac
+  case "$1" in
+    --output) shift; dest="$1" ;;
+    --location) have_location=1 ;;
+    --max-redirs) shift; maxredirs="$1" ;;
+  esac
   shift
 done
+[ "$have_location" = 1 ] && [ "$maxredirs" = 0 ] || exit 7
+[ "${MOCK_REDIRECT:-0}" != 1 ] || exit 47
 printf '%s\n' '{"Status":{"Topic":"tasmota_CB0735"},"StatusSTS":{"POWER":"ON","Dimmer":50,"Color":"FF80400000","CT":250}}' > "$dest"
 MOCK
 chmod 700 "$TMP/uci" "$TMP/mosquitto_sub" "$TMP/mosquitto_pub" "$TMP/jsonfilter" "$TMP/fetch"
-export JARBIS_TEST_MODE=1 JARBIS_UCI_BIN="$TMP/uci" JARBIS_MQTT_PUB_BIN="$TMP/mosquitto_pub" JARBIS_MQTT_SUB_BIN="$TMP/mosquitto_sub" JARBIS_JSONFILTER_BIN="$TMP/jsonfilter" JARBIS_FETCH_BIN="$TMP/fetch"
+export JARBIS_TEST_MODE=1 JARBIS_UCI_BIN="$TMP/uci" JARBIS_MQTT_PUB_BIN="$TMP/mosquitto_pub" JARBIS_MQTT_SUB_BIN="$TMP/mosquitto_sub" JARBIS_JSONFILTER_BIN="$TMP/jsonfilter" JARBIS_CURL_BIN="$TMP/fetch"
 export JARBIS_MQTT_CONFIG_DIR="$TMP/config" MOCK_SUB_LOG="$TMP/sub.log" MOCK_PUB_LOG="$TMP/pub.log"
 mkdir "$JARBIS_MQTT_CONFIG_DIR"
 export JARBIS_DISCOVERY_CACHE="$TMP/discovery.records" JARBIS_LEASE_FILE="$TMP/dhcp.leases"
@@ -85,6 +92,15 @@ sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" || fail 'MQTT 오류 후
 : > "$MOCK_PUB_LOG"
 sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" || fail 'HTTP 우선 조회 실패'
 [ ! -s "$MOCK_SUB_LOG" ] && [ ! -s "$MOCK_PUB_LOG" ] || fail 'HTTP 성공 후 불필요한 MQTT 요청 발생'
+# A device-supplied redirect must be rejected, never parsed as another bulb.
+MOCK_REDIRECT=1; export MOCK_REDIRECT
+MOCK_NO_REPLY=1; export MOCK_NO_REPLY
+rm -f "$OUTPUT/state" "$OUTPUT/source"
+if sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" >"$TMP/out" 2>"$TMP/err"; then
+    fail 'redirect was accepted as a bulb state'
+fi
+[ "$(cat "$OUTPUT/reason")" = HTTP_FETCH_FAILED ] || fail 'redirect error state missing'
+unset MOCK_REDIRECT
 MOCK_POWER1=1; export MOCK_POWER1
 sh "$ROOT/root/usr/libexec/jarbis-state" bulb "$OUTPUT" || fail 'POWER1 상태 파싱 실패'
 [ "$(cat "$OUTPUT/state")" = 'ON|50|FF8040|250' ] || fail 'POWER1 상태 검증 실패'

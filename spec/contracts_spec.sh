@@ -83,6 +83,20 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The output should start with 'PASS:'
     The error should be blank
   End
+  It 'HTTP 리다이렉트로 자격 증명이 다른 주소로 전송되지 않는지 확인한다'
+    When run command python3 "$SHELLSPEC_PROJECT_ROOT/tests/test-http-redirect.py"
+    The status should be success
+    The output should include 'PASS:'
+    The error should be blank
+  End
+
+  It 'Mosquitto 비밀번호 도구의 빌드 설정을 실제 Make 레시피로 검사한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-mosquitto-build.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
   It '관리형 MQTT 브로커 자동 설정과 기존 설정 보호를 확인한다'
     When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-broker.sh"
     The status should be success

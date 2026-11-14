@@ -9,7 +9,7 @@ UCI_BIN="${JARBIS_UCI_BIN:-uci}"
 PUB_BIN="${JARBIS_MQTT_PUB_BIN:-mosquitto_pub}"
 SUB_BIN="${JARBIS_MQTT_SUB_BIN:-mosquitto_sub}"
 JSON_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
-FETCH_BIN="${JARBIS_FETCH_BIN:-uclient-fetch}"
+HTTP_BIN="${JARBIS_CURL_BIN:-curl}"
 CONFIG_DIR="${JARBIS_MQTT_CONFIG_DIR:-/etc/jarbis}"
 CACHE="${JARBIS_DISCOVERY_CACHE:-/tmp/jarbis-discovery.records}"
 LEASES="${JARBIS_LEASE_FILE:-/tmp/dhcp.leases}"
@@ -147,12 +147,15 @@ http_candidate() {
 }
 
 http_query() {
-    command -v "$FETCH_BIN" >/dev/null 2>&1 || { http_reason=HTTP_CLIENT_MISSING; return 1; }
+    command -v "$HTTP_BIN" >/dev/null 2>&1 || { http_reason=HTTP_CLIENT_MISSING; return 1; }
     target="$(http_candidate)" || { http_reason=HTTP_NO_CANDIDATE; return 1; }
     # Prefer an identity-verified LAN HTTP request: it avoids waiting for a
     # 3-second MQTT timeout before checking a reachable registered light.
-    # No device credentials, proxy, redirection to other hosts, or changes.
-    if ! "$FETCH_BIN" -q -Y off -T 3 -O "$output/http" \
+    # Strictly no redirects (even to a different port on the same LAN host).
+    # Registered address only; no proxy, credentials or state-changing request.
+    if ! "$HTTP_BIN" --disable --fail --silent --show-error --location --max-redirs 0 \
+        --noproxy '*' --proto '=http' --connect-timeout 2 --max-time 3 \
+        --max-filesize 8192 --output "$output/http" \
         "http://$target/cm?cmnd=Status%200" >/dev/null 2>&1; then
         http_reason=HTTP_FETCH_FAILED
         return 1

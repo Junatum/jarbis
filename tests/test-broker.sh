@@ -148,4 +148,21 @@ if sh "$ROOT/root/usr/libexec/jarbis-broker" setup > "$TMP/out" 2>/dev/null; the
 printf '# commented sample only\n' > "$JARBIS_MOSQUITTO_CONF"
 printf '%s\n' 1 > "$STATE/mosquitto.owrt.use_uci"
 if sh "$ROOT/root/usr/libexec/jarbis-broker" setup > "$TMP/out" 2>/dev/null; then fail '기존 UCI 브로커를 덮어씀'; fi
-printf 'PASS: 인증된 로컬 브로커 생성·재기동·자격 증명 보존·기존 Mosquitto 설정 보호\n'
+# External Broker: health probes use user-supplied 0600 client config.
+# Do not initialize/reconfigure a server that Jarbis does not own.
+printf '%s\n' external > "$STATE/jarbis.broker.mode"
+printf '%s\n' '-u external-user' > "$TMP/secrets/mosquitto_pub"
+chmod 644 "$TMP/secrets/mosquitto_pub"
+if sh "$ROOT/root/usr/libexec/jarbis-broker" check > "$TMP/out" 2> "$TMP/error"; then fail '외부 인증 설정의 과도한 파일 권한을 허용함'; fi
+chmod 600 "$TMP/secrets/mosquitto_pub"
+sh "$ROOT/root/usr/libexec/jarbis-broker" check || fail '외부 브로커 연결 검사 실패'
+sh "$ROOT/root/usr/libexec/jarbis-broker" status || fail '외부 브로커 상태 검사 실패'
+MOCK_PUB_FAIL=1; export MOCK_PUB_FAIL
+if sh "$ROOT/root/usr/libexec/jarbis-broker" check > "$TMP/out" 2> "$TMP/error"; then fail '외부 브로커 연결 실패를 성공으로 표시함'; fi
+unset MOCK_PUB_FAIL
+mv "$TMP/secrets/mosquitto_pub" "$TMP/secrets/mosquitto_pub.save"
+ln -s "$TMP/secrets/mosquitto_pub.save" "$TMP/secrets/mosquitto_pub"
+if sh "$ROOT/root/usr/libexec/jarbis-broker" check > "$TMP/out" 2> "$TMP/error"; then fail '외부 인증 symlink를 허용함'; fi
+rm "$TMP/secrets/mosquitto_pub"
+if sh "$ROOT/root/usr/libexec/jarbis-broker" start > "$TMP/out" 2> "$TMP/error"; then fail '외부 브로커를 초기화함'; fi
+printf 'PASS: 인증된 로컬·외부 브로커 연결·자격 증명 보존·기존 Mosquitto 보호\n'
