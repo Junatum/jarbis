@@ -2,6 +2,9 @@
 
 **Jarbis — Just A Rather Very Beautiful Intelligent System**
 
+[![CI](https://github.com/Junatum/jarbis/actions/workflows/ci.yml/badge.svg)](https://github.com/Junatum/jarbis/actions/workflows/ci.yml)
+![License](https://img.shields.io/github/license/Junatum/jarbis?label=License)
+
 SmartSafeHub용 **OpenWrt 경량 로컬 스마트홈 엔진**입니다. 현재 Tasmota Wi-Fi 전구의 검색·등록·연결·전원·밝기·RGB 색상·색온도 제어를 지원합니다. 이름은 대중문화 속 J.A.R.V.I.S.에서 착안한 비공식 명칭이며 Marvel과 관련이 없습니다.
 
 - **라이선스:** `GPL-3.0-or-later` ([LICENSE](LICENSE))
