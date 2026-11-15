@@ -129,6 +129,24 @@ cp "$TMP/secrets/device-credentials" "$TMP/saved"
 sh "$ROOT/root/usr/libexec/jarbis-broker" start || fail '재시작 실패'
 [ "$(wc -l < "$TMP/commits")" -eq 2 ] || fail '재시작 시 불필요한 flash commit'
 cmp "$TMP/saved" "$TMP/secrets/device-credentials" || fail '재시작이 비밀번호를 변경함'
+# Apps removal may stop only a provably owned managed broker. A shared
+# listener must fail closed, without stopping the service or changing secrets.
+CUSTOM=1; export CUSTOM
+before="$(wc -l < "$TMP/actions")"
+if sh "$ROOT/root/usr/libexec/jarbis-broker" stop > "$TMP/out" 2> "$TMP/error"; then
+    fail '공유 MQTT 리스너가 있는 브로커를 중지함'
+fi
+[ "$(wc -l < "$TMP/actions")" -eq "$before" ] || fail '공유 브로커 서비스가 변경됨'
+grep -q 'shared Mosquitto listener/bridge' "$TMP/error" || fail '공유 브로커 오류 설명 누락'
+unset CUSTOM
+sh "$ROOT/root/usr/libexec/jarbis-broker" stop || fail '전용 MQTT 브로커 중지 실패'
+[ "$(tail -n 2 "$TMP/actions")" = "$(printf 'stop\ndisable')" ] || fail '서비스 중지/자동시작 해제 누락'
+cmp "$TMP/saved" "$TMP/secrets/device-credentials" || fail '앱 중지 시 인증 정보가 삭제됨'
+printf '%s\n' external > "$STATE/jarbis.broker.mode"
+before="$(wc -l < "$TMP/actions")"
+sh "$ROOT/root/usr/libexec/jarbis-broker" stop || fail '외부 브로커를 종료하지 않고 유지해야 함'
+[ "$(wc -l < "$TMP/actions")" -eq "$before" ] || fail '외부 브로커를 종료함'
+printf '%s\n' managed > "$STATE/jarbis.broker.mode"
 # Missing managed secrets or modified settings are not silently repaired.
 rm -f "$TMP/secrets/mosquitto_sub"
 if sh "$ROOT/root/usr/libexec/jarbis-broker" start > "$TMP/out" 2>/dev/null; then fail '분실한 인증 파일을 무시함'; fi

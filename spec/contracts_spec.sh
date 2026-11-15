@@ -15,6 +15,13 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The error should be blank
   End
 
+  It 'Jarbis 공식 Apps 출시와 공유 MQTT Broker 제거 안전성을 검증한다'
+    When run command python3 "$SHELLSPEC_PROJECT_ROOT/tests/test-apps-release.py"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
   It '패키지·RPC·ACL·버전 및 보안 계약을 확인한다'
     When run command python3 "$SHELLSPEC_PROJECT_ROOT/tests/test-contract.py"
     The status should be success

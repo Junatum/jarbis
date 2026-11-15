@@ -2,7 +2,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=jarbis
-PKG_VERSION:=0.2.0
+PKG_VERSION:=0.2.1
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
@@ -83,9 +83,12 @@ endef
 
 define Package/jarbis/prerm
 #!/bin/sh
-if [ -z "$${IPKG_INSTROOT}" ] && [ -x /etc/init.d/rpcd ]; then
-	# rpcd will be reloaded by package manager on install/upgrade or next restart.
-	:
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	# Fail closed if we cannot prove exclusive broker ownership. Never stop a
+	# shared broker, remove its listeners, or delete persisted secrets.
+	if [ -x /etc/init.d/jarbis ]; then
+		/etc/init.d/jarbis stop || exit 1
+	fi
 fi
 exit 0
 endef

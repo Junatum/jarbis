@@ -14,10 +14,29 @@ UBUS_BIN="${JARBIS_UBUS_BIN:-ubus}"
 JSONFILTER_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
 fail() { printf 'jarbis-broker: %s\n' "$1" >&2; exit 1; }
 get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
-[ "$#" -eq 1 ] || fail 'usage: jarbis-broker setup|start|status|check|diagnose'
-case "$1" in setup|start|status|check|diagnose) action="$1" ;; *) fail 'invalid action' ;; esac
+[ "$#" -eq 1 ] || fail 'usage: jarbis-broker setup|start|stop|status|check|diagnose'
+case "$1" in setup|start|stop|status|check|diagnose) action="$1" ;; *) fail 'invalid action' ;; esac
 mode="$(get jarbis.broker.mode)"
 case "$mode" in managed|external) ;; *) fail 'invalid broker mode' ;; esac
+# A dedicated managed broker can be stopped without touching persistent
+# credentials. If another app configured a listener/bridge, fail closed: the
+# user must explicitly choose how that shared service should be managed.
+# This action does not delete APK-owned or user-owned MQTT configuration.
+if [ "$action" = stop ]; then
+    [ "$mode" = managed ] || exit 0
+    [ "$(get jarbis.broker.managed_ready)" = 1 ] || exit 0
+    [ "$(get mosquitto.jarbis_local)" = listener ] && \
+    [ "$(get mosquitto.jarbis_lan)" = listener ] && \
+    [ "$(get mosquitto.mosquitto.password_file)" = "$BROKER_PASS" ] || fail 'broker ownership cannot be proven'
+    if "$UCI_BIN" -q show mosquitto 2>/dev/null | grep -E '=listener|=bridge' | \
+        grep -Ev '^mosquitto\.(jarbis_local|jarbis_lan)=listener$' | grep -q .; then
+        fail 'shared Mosquitto listener/bridge found; leave broker running'
+    fi
+    [ -x "$INIT" ] || fail 'Mosquitto service missing'
+    "$INIT" stop || fail 'could not stop owned broker'
+    "$INIT" disable || fail 'could not disable owned broker'
+    exit 0
+fi
 # Never provision/restart or diagnose a broker that Jarbis does not own.
 if [ "$mode" = external ]; then
     case "$action" in check|status) ;; *) fail 'broker is external';; esac

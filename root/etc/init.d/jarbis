@@ -9,6 +9,7 @@ start() {
     /usr/libexec/jarbis-broker start
 }
 stop() {
-    # Never stop a shared broker that other applications may use.
-    :
+    # Stop only a provably exclusive managed Broker. External/shared Brokers
+    # are never changed, and all credentials are preserved for reinstall.
+    /usr/libexec/jarbis-broker stop
 }
