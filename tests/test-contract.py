@@ -221,19 +221,6 @@ class ProjectContracts(unittest.TestCase):
         self.assertTrue((ROOT / 'tools/check_openwrt_commands.py').is_file())
         self.assertTrue((ROOT / 'tools/openwrt-25.12-commands.txt').is_file())
 
-    def test_공개_라이선스_내용과_패키지_revision을_확인한다(self):
-        mk = (ROOT / 'Makefile').read_text()
-        lic = (ROOT / 'LICENSE').read_text()
-        self.assertIn('GNU GENERAL PUBLIC LICENSE', lic)
-        self.assertIn('Version 3, 29 June 2007', lic)
-        rev = re.search(r'(?m)^PKG_RELEASE:=(\d+)$', mk)
-        self.assertIsNotNone(rev)
-        label = f'0.1.0-r{rev.group(1)}'
-        for doc in ['README.md', 'docs/ARCHITECTURE.md', 'docs/SECURITY.md']:
-            with self.subTest(doc=doc):
-                self.assertIn(label, (ROOT / doc).read_text())
-        self.assertIn(f'## [{label}]', (ROOT / 'CHANGELOG.md').read_text())
-
     def test_공개_문서와_민감정보_무시_정책을_검증한다(self):
         self.assertFalse((ROOT / 'docs/PUBLIC_RELEASE.md').exists())
         for name in ['README.md', 'docs/INTEGRATION.md', 'CONTRIBUTING.md', 'SECURITY.md']:

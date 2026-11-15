@@ -4,7 +4,6 @@
 
 SmartSafeHub용 **OpenWrt 경량 로컬 스마트홈 엔진**입니다. 현재 Tasmota Wi-Fi 전구의 검색·등록·연결·전원·밝기·RGB 색상·색온도 제어를 지원합니다. 이름은 대중문화 속 J.A.R.V.I.S.에서 착안한 비공식 명칭이며 Marvel과 관련이 없습니다.
 
-- **패키지 버전:** `0.1.0-r12` (기능 버전 `0.1.0`, OpenWrt 패키지 revision `11`)
 - **라이선스:** `GPL-3.0-or-later` ([LICENSE](LICENSE))
 - **플랫폼:** OpenWrt 25.12 기반 SmartSafeHub. 모델별 설치 용량·RAM·MQTT 의존성 검증 필요
 - **런타임:** BusyBox ash, UCI, rpcd-ucode, Mosquitto, curl, jsonfilter. Python, Node.js, 상주 AI 서비스는 불필요
@@ -25,6 +24,12 @@ SmartSafeHub용 **OpenWrt 경량 로컬 스마트홈 엔진**입니다. 현재 T
 | Matter/Zigbee 등 Tasmota 외 프로토콜 | 미구현 |
 
 Jarbis는 SmartSafeHub의 **공유기 웹사이트** 스마트홈 화면과 연동하는 독립 백엔드입니다. 프론트엔드 소스는 `luci-app-smartsafehub`에서 관리하며 이 저장소에는 웹 빌드 결과물을 포함하지 않습니다. Jarbis만 설치해도 별도 LuCI 메뉴가 자동 추가되지는 않습니다. 상세 연동 계약은 [docs/INTEGRATION.md](docs/INTEGRATION.md)를 확인하세요.
+
+## 패키지 버전
+
+| 패키지 | Stable | Beta |
+| --- | --- | --- |
+| Jarbis | [![Stable Jarbis](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Frepo.smartsafehub.com%2Fstable%2Fversions.json&query=%24.packages%5B%22jarbis%22%5D&label=&color=brightgreen&cacheSeconds=300)](https://repo.smartsafehub.com/stable/versions.json) | [![Beta Jarbis](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Frepo.smartsafehub.com%2Fbeta%2Fversions.json&query=%24.packages%5B%22jarbis%22%5D&label=&color=orange&cacheSeconds=300)](https://repo.smartsafehub.com/beta/versions.json) |
 
 ## 설치 및 빌드
 
