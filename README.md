@@ -1,16 +1,16 @@
 # Jarbis
 
-**Jarbis — Just A Rather Very Beautiful Intelligent System**
+**J.A.R.B.I.S. — Just A Rather Very Beautiful Intelligent System**
 
 [![CI](https://github.com/Junatum/jarbis/actions/workflows/ci.yml/badge.svg)](https://github.com/Junatum/jarbis/actions/workflows/ci.yml)
 ![License](https://img.shields.io/github/license/Junatum/jarbis?label=License)
 
-SmartSafeHub용 **OpenWrt 경량 로컬 스마트홈 엔진**입니다. 현재 Tasmota Wi-Fi 전구의 검색·등록·연결·전원·밝기·RGB 색상·색온도 제어를 지원합니다. 이름은 대중문화 속 J.A.R.V.I.S.에서 착안한 비공식 명칭이며 Marvel과 관련이 없습니다.
+SmartSafeHub용 **경량 로컬 스마트홈 엔진**입니다. 현재 Tasmota Wi-Fi 전구의 검색·등록·연결·전원·밝기·RGB 색상·색온도 제어를 지원합니다. 이름은 대중문화 속 J.A.R.V.I.S.에서 착안한 비공식 명칭이며 Marvel과 관련이 없습니다.
 
-- **라이선스:** `GPL-3.0-or-later` ([LICENSE](LICENSE))
 - **플랫폼:** OpenWrt 25.12 기반 SmartSafeHub. 모델별 설치 용량·RAM·MQTT 의존성 검증 필요
 - **런타임:** BusyBox ash, UCI, rpcd-ucode, Mosquitto, curl, jsonfilter. Python, Node.js, 상주 AI 서비스는 불필요
 - **상태:** 초기 개발 버전. 일반 사용자용 배포 전 실기기 검증이 필요합니다
+- **라이선스:** `GPL-3.0-or-later` ([LICENSE](LICENSE))
 
 ## 기능과 제한 사항
 
@@ -113,3 +113,7 @@ CI에서는 `JARBIS_REQUIRE_UCODE=1`로 ucode 컴파일 및 RPC 런타임 테스
 - [변경 내역](CHANGELOG.md)
 
 코드 및 문서의 변경은 GPL-3.0-or-later 조건으로 배포합니다. 외부 서비스·도구의 라이선스는 각 상위 프로젝트의 배포 조건을 따르며, 타사 소스나 자산을 이 저장소에 추가할 때는 해당 라이선스 전문·출처를 함께 보관해야 합니다.
+
+## 라이선스
+
+이 프로젝트는 [GPL-3.0-or-later](LICENSE) 조건으로 배포됩니다.
