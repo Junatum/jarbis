@@ -88,7 +88,7 @@ case "$1" in
         while IFS='|' read -r source ip mac known title; do
             if [ "$known" = "$topic" ]; then
                 case "$protocol:$source" in
-                    tasmota:http|tasmota:mqtt|shelly_htg3:shelly-http) found=1; break ;;
+                    tasmota:http|tasmota:mqtt|shelly_htg3:shelly-http|shelly_htg3:shelly-dhcp) found=1; break ;;
                 esac
             fi
         done < "$CACHE"

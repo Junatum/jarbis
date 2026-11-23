@@ -128,6 +128,7 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
+[ -z "${HTTP_LOG:-}" ] || printf '%s\n' "$url" >> "$HTTP_LOG"
 case "$url" in
     http://192.168.1.20/rpc/Shelly.GetDeviceInfo)
         printf '%s\n' '{"id":"shellyhtg3-aabbccddeeff","app":"HTG3","model":"S3SN-0U12A","gen":3}' > "$out" ;;
@@ -146,4 +147,21 @@ export JARBIS_LEASES="$TMP/leases" JARBIS_CURL_BIN="$TMP/bin/curl"
 sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail 'Shelly discovery failed'
 grep -Fx 'shelly-http|192.168.1.20|aa:bb:cc:dd:ee:ff|shellyhtg3-aabbccddeeff|Shelly H&T Gen3' "$TMP/discovery" >/dev/null || fail 'valid Shelly identity not discovered'
 ! grep -F '192.168.1.21' "$TMP/discovery" >/dev/null || fail 'wrong Shelly model accepted'
+# Real field case: Shelly is asleep and its lease appears after 16 others.
+# Matching hostname and MAC is sufficient for a provisional candidate only.
+: > "$TMP/leases"
+for n in 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37; do
+    printf '0 40:f5:20:cb:07:35 192.168.1.%s ordinary-%s *\n' "$n" "$n" >> "$TMP/leases"
+done
+printf '0 08:3a:f2:d1:32:9c 192.168.1.209 shellyhtg3-083af2d1329c 01:08:3a:f2:d1:32:9c\n' >> "$TMP/leases"
+# A claimed Shelly hostname not matching its MAC must never be offered.
+printf '0 00:11:22:33:44:55 192.168.1.210 shellyhtg3-999999999999 *\n' >> "$TMP/leases"
+export HTTP_LOG="$TMP/http-log"
+: > "$HTTP_LOG"
+sh "$ROOT/root/usr/libexec/jarbis-discover" scan || fail 'asleep Shelly discovery failed'
+grep -Fx 'shelly-dhcp|192.168.1.209|08:3a:f2:d1:32:9c|shellyhtg3-083af2d1329c|Shelly H&T Gen3' "$TMP/discovery" >/dev/null || fail 'asleep Shelly after 16 leases not discovered'
+! grep -F '192.168.1.210' "$TMP/discovery" >/dev/null || fail 'hostname-MAC mismatch shown as Shelly'
+[ "$(wc -l < "$HTTP_LOG")" -le 16 ] || fail 'Shelly priority exceeded discovery HTTP budget'
+sh "$MANAGE" device-add sleeping 'Shelly H&T Gen3' 'shellyhtg3-083af2d1329c' shelly_htg3 || fail 'approved DHCP-only Shelly was not registered'
+[ "$(cat "$STATE/jarbis.sleeping.protocol")" = shelly_htg3 ] || fail 'sleeping Shelly registration did not persist'
 printf 'PASS: Shelly 승인 등록·전체/부분 MQTT 보고·수치/소스 검증·절전 캐시·복원·Tasmota 호환\n'

@@ -225,19 +225,19 @@ export function discovery_list(reader) {
             if (length(fields) != 5) continue;
             const source = fields[0], ip = fields[1], mac = fields[2];
             const topic = fields[3], name = fields[4];
-            if (source != 'http' && source != 'mqtt' && source != 'shelly-http') continue;
+            if (source != 'http' && source != 'mqtt' && source != 'shelly-http' && source != 'shelly-dhcp') continue;
             if (topic && match(topic, /^[A-Za-z0-9_-]{1,96}$/) == null) continue;
             if (ip && match(ip, /^[0-9.]{7,15}$/) == null) continue;
             if (mac && match(mac, /^[a-fA-F0-9:]{12,17}$/) == null) continue;
             if (match(name, /^[A-Za-z0-9 _&-]{1,48}$/) == null) continue;
-            const shelly = source == 'shelly-http';
+            const shelly = source == 'shelly-http' || source == 'shelly-dhcp';
             if (shelly && match(topic, /^shellyhtg3-[A-Fa-f0-9]{12}$/) == null) continue;
             let key = (shelly ? 'shelly:' : 'tasmota:') + (ip || mac || topic);
             if (!key || seen[key]) continue;
             seen[key] = true;
             const protocol = shelly ? 'shelly_htg3' : 'tasmota';
             push(entries, { protocol: protocol, kind: shelly ? 'sensor' : 'light',
-                            source: shelly ? 'http' : source, ip: ip,
+                            source: shelly ? (source == 'shelly-http' ? 'http' : 'dhcp') : source, ip: ip,
                             mac: mac, topic: topic, name: name,
                             registered: !!registered[protocol + ':' + topic] });
             if (length(entries) >= 32) break;

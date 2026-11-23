@@ -108,6 +108,9 @@ const result = {
     discoveredShelly: discovery_list(function(path) {
         return 'shelly-http|192.168.1.20|aa:bb:cc:dd:ee:ff|shellyhtg3-aabbccddeeff|Shelly H&T Gen3\n';
     }),
+    discoveredShellySleeping: discovery_list(function(path) {
+        return 'shelly-dhcp|192.168.1.209|08:3a:f2:d1:32:9c|shellyhtg3-083af2d1329c|Shelly H&T Gen3\n';
+    }),
     scan: discovery_scan({}, function(argv, timeout) {
         if (timeout != 25000 || argv[0] != '/usr/libexec/jarbis-discover' || argv[1] != 'scan') return 1;
         return 0;
@@ -218,6 +221,9 @@ require(len(success_data('discoveredMissing')['devices']) == 0, '캐시 파일�
 require(success_data('discoveredShelly')['devices'][0]['protocol'] == 'shelly_htg3', 'Shelly discovery protocol')
 require(success_data('discoveredShelly')['devices'][0]['kind'] == 'sensor', 'Shelly discovery kind')
 require(success_data('discoveredShelly')['devices'][0]['name'] == 'Shelly H&T Gen3', 'Shelly H&T name must survive RPC validation')
+require(len(success_data('discoveredShellySleeping')['devices']) == 1, 'sleeping Shelly DHCP candidate visible')
+require(success_data('discoveredShellySleeping')['devices'][0]['source'] == 'dhcp', 'sleeping Shelly must be marked DHCP-only, not HTTP verified')
+require(success_data('discoveredShellySleeping')['devices'][0]['registered'] is False, 'sleeping Shelly must require manual registration')
 require(success_data('discoveredShelly')['devices'][0]['registered'] is True, 'Shelly already registered')
 require(len(success_data('discovered')['devices']) == 1, '중복 및 위험 기기 검색 결과 필터링')
 require(len(success_data('scan')['devices']) == 1, '검색 RPC 실행 및 결과 수신')

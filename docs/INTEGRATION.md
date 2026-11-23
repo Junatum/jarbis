@@ -55,8 +55,10 @@ ubus call jarbis status '{}'
    `broker_credentials`에서 확인한 사용자 이름·비밀번호를 설정합니다. `RPC status notifications`를 켭니다.
    기존 MQTT 연결을 자동으로 덮어쓰지 않습니다. 본 버전은 기본 MQTT topic prefix
    `shellyhtg3-<12자리 MAC>`만 지원합니다. `status_ntf`는 선택사항입니다.
-3. 스마트홈의 기기 검색으로 `ShellyHTG3-...` DHCP 호스트명을 가진 켜진 센서를 검색하고 승인해 등록합니다.
-   배터리 절전 중 검색되지 않으면 기기 버튼을 눌러 깨운 후 재검색합니다.
+3. 스마트홈에서 기기 검색을 실행합니다. Shelly DHCP 호스트명과 MAC 주소가 일치하면
+   센서가 잠든 상태에서도 등록 후보로 표시됩니다(`source=dhcp`). HTTP로 모델·MAC까지
+   확인된 경우에는 `source=http`가 표시됩니다. DHCP 기반 후보는 모델이 확증된 기기가
+   아니므로 사용자가 실제 기기인지 확인하고 승인해야만 등록됩니다. 자동 등록은 하지 않습니다.
 4. 등록 후 기기를 다시 깨워 MQTT 보고를 수신시키면 온도·습도·배터리 카드가 표시됩니다.
    센서의 기본 `NotifyFullStatus`/`NotifyStatus` 및 선택형 MQTT component status를 인식합니다.
 5. `sensor_state`는 마지막 MQTT 수신값을 보여주며 배터리 기기를 강제로 깨우거나 폴링하지 않습니다.

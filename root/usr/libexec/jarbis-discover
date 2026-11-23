@@ -62,30 +62,48 @@ if [ "$subnet24" = 1 ]; then
 fi
 count=0
 if [ -n "$prefix" ] && [ -f "$LEASES" ]; then
-    # Up to 16 candidate HTTP requests at 1s each, staying inside the 25s RPC budget.
-    while read -r expiration mac ip hostname clientid; do
-        [ "$count" -lt 16 ] || break
-        case "$ip" in "$prefix"*) ;; *) continue ;; esac
-        last="${ip#"$prefix"}"
-        case "$last" in ''|*[!0-9]*) continue ;; esac
-        [ "$last" -ge 1 ] 2>/dev/null && [ "$last" -le 254 ] 2>/dev/null || continue
-        count=$((count + 1))
-        # Prioritize identified Tasmota DHCP names with a slightly longer
-        # timeout while keeping a strict bound across at most 16 candidates.
-        timeout=1
-        case "$hostname" in
-            tasmota-*|Tasmota-*)
-                if [ "${tasmota_slow:-0}" -lt 4 ]; then
-                    timeout=2
-                    tasmota_slow=$((${tasmota_slow:-0} + 1))
-                fi
-                ;;
-        esac
-        # Battery Shelly sensors are reachable via HTTP only briefly after
-        # waking. Probe known Shelly DHCP hostnames with a read-only RPC,
-        # using the same bounded candidate set and timeout budget.
-        case "$hostname" in
-            ShellyHTG3-*|shellyhtg3-*)
+    # A battery sensor may already be asleep when the user starts discovery.
+    # Examine up to four strongly identified Shelly DHCP leases first, even
+    # if they occur after the first 16 leases. All HTTP requests remain inside
+    # the same 16-request / 25-second RPC budget.
+    shelly_count=0
+    for phase in shelly other; do
+        while read -r expiration mac ip hostname clientid; do
+            case "$hostname" in
+                ShellyHTG3-*|shellyhtg3-*) is_shelly=1 ;;
+                *) is_shelly=0 ;;
+            esac
+            if [ "$phase" = shelly ]; then
+                [ "$is_shelly" = 1 ] || continue
+                [ "$shelly_count" -lt 4 ] || continue
+            else
+                [ "$is_shelly" = 0 ] || continue
+            fi
+            [ "$count" -lt 16 ] || break
+            case "$ip" in "$prefix"*) ;; *) continue ;; esac
+            last="${ip#"$prefix"}"
+            case "$last" in ''|*[!0-9]*) continue ;; esac
+            [ "$last" -ge 1 ] 2>/dev/null && [ "$last" -le 254 ] 2>/dev/null || continue
+
+            if [ "$is_shelly" = 1 ]; then
+                # A Shelly hostname alone is untrusted. Require its 12 hex
+                # characters to match the DHCP MAC exactly before displaying
+                # a provisional (never automatically registered) candidate.
+                case "$hostname" in
+                    ShellyHTG3-*) suffix="${hostname#ShellyHTG3-}" ;;
+                    shellyhtg3-*) suffix="${hostname#shellyhtg3-}" ;;
+                esac
+                case "$suffix" in ''|*[!a-fA-F0-9]*) continue ;; esac
+                [ "${#suffix}" -eq 12 ] || continue
+                mac_hex="$(printf '%s' "$mac" | tr -d ':' | tr A-F a-f)"
+                suffix_lower="$(printf '%s' "$suffix" | tr A-F a-f)"
+                [ "$suffix_lower" = "$mac_hex" ] || continue
+                shelly_count=$((shelly_count + 1))
+                count=$((count + 1))
+                source=shelly-dhcp
+                # If the sensor is awake, verify its model, generation and
+                # identity. A responding but mismatched model is rejected,
+                # not silently downgraded into a DHCP-only candidate.
                 if "$HTTP_BIN" --disable --fail --silent --show-error --location --max-redirs 0 \
                     --noproxy '*' --proto '=http' --connect-timeout 1 \
                     --max-time 1 --max-filesize 4096 --output "$TMP/shelly" \
@@ -94,41 +112,50 @@ if [ -n "$prefix" ] && [ -f "$LEASES" ]; then
                     app="$(jsonfilter -i "$TMP/shelly" -e '@.app' 2>/dev/null || :)"
                     gen="$(jsonfilter -i "$TMP/shelly" -e '@.gen' 2>/dev/null || :)"
                     sid="$(jsonfilter -i "$TMP/shelly" -e '@.id' 2>/dev/null || :)"
-                    case "$sid" in shellyhtg3-*) ;; *) sid='' ;; esac
-                    suffix="${sid#shellyhtg3-}"
-                    case "$suffix" in ''|*[!a-fA-F0-9]*) sid='' ;; esac
-                    [ "${#suffix}" -eq 12 ] || sid=''
-                    mac_hex="$(printf '%s' "$mac" | tr -d ':' | tr A-F a-f)"
-                    suffix_lower="$(printf '%s' "$suffix" | tr A-F a-f)"
-                    if [ "$model" = S3SN-0U12A ] && [ "$app" = HTG3 ] &&
-                        [ "$gen" = 3 ] && [ -n "$sid" ] && [ "$suffix_lower" = "$mac_hex" ]; then
-                        printf 'shelly-http|%s|%s|shellyhtg3-%s|Shelly H&T Gen3\n' \
-                            "$ip" "$mac" "$suffix_lower" >> "$TMP/results"
-                    fi
+                    case "$sid" in shellyhtg3-*) ;; *) continue ;; esac
+                    sid_suffix="${sid#shellyhtg3-}"
+                    sid_lower="$(printf '%s' "$sid_suffix" | tr A-F a-f)"
+                    [ "$model" = S3SN-0U12A ] && [ "$app" = HTG3 ] &&
+                        [ "$gen" = 3 ] && [ "$sid_lower" = "$mac_hex" ] || continue
+                    source=shelly-http
                 fi
+                printf '%s|%s|%s|shellyhtg3-%s|Shelly H&T Gen3\n' \
+                    "$source" "$ip" "$mac" "$suffix_lower" >> "$TMP/results"
                 continue
-                ;;
-        esac
-        # No redirects or proxies: a DHCP lease must not cause a second
-        # request to a different host. Limit response size before parsing.
-        if "$HTTP_BIN" --disable --fail --silent --show-error --location --max-redirs 0 \
-            --noproxy '*' --proto '=http' --connect-timeout "$timeout" \
-            --max-time "$timeout" --max-filesize 4096 --output "$TMP/http" \
-            "http://$ip/cm?cmnd=Status%200" >/dev/null 2>&1; then
-            version="$(jsonfilter -i "$TMP/http" -e '@.StatusFWR.Version' 2>/dev/null || :)"
-            # Tasmota Status 0 contains the MQTT topic under Status.Topic;
-            # do not rely on the firmware version containing 'tasmota'.
-            topic="$(jsonfilter -i "$TMP/http" -e '@.Status.Topic' 2>/dev/null || :)"
-            name="$(jsonfilter -i "$TMP/http" -e '@.Status.DeviceName' 2>/dev/null || :)"
-            [ -n "$version" ] && [ -n "$topic" ] || continue
-            case "$topic" in ''|*[!a-zA-Z0-9_-]*|[-_]*) continue ;; esac
-            case "$mac" in *[!a-fA-F0-9:]*|'') mac='' ;; esac
-            # Data is untrusted. Only safe ASCII is placed in the line protocol.
-            name="$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9 _-' | cut -c 1-48)"
-            [ -n "$name" ] || name='Tasmota'
-            printf 'http|%s|%s|%s|%s\n' "$ip" "$mac" "$topic" "$name" >> "$TMP/results"
-        fi
-    done < "$LEASES"
+            fi
+
+            count=$((count + 1))
+            # Tasmota named devices may need a little longer on slow hardware.
+            timeout=1
+            case "$hostname" in
+                tasmota-*|Tasmota-*)
+                    if [ "${tasmota_slow:-0}" -lt 4 ]; then
+                        timeout=2
+                        tasmota_slow=$((${tasmota_slow:-0} + 1))
+                    fi
+                    ;;
+            esac
+            # No redirects or proxies: a DHCP lease must not cause a second
+            # request to a different host. Limit response size before parsing.
+            if "$HTTP_BIN" --disable --fail --silent --show-error --location --max-redirs 0 \
+                --noproxy '*' --proto '=http' --connect-timeout "$timeout" \
+                --max-time "$timeout" --max-filesize 4096 --output "$TMP/http" \
+                "http://$ip/cm?cmnd=Status%200" >/dev/null 2>&1; then
+                version="$(jsonfilter -i "$TMP/http" -e '@.StatusFWR.Version' 2>/dev/null || :)"
+                # Tasmota Status 0 contains the MQTT topic under Status.Topic;
+                # do not rely on the firmware version containing 'tasmota'.
+                topic="$(jsonfilter -i "$TMP/http" -e '@.Status.Topic' 2>/dev/null || :)"
+                name="$(jsonfilter -i "$TMP/http" -e '@.Status.DeviceName' 2>/dev/null || :)"
+                [ -n "$version" ] && [ -n "$topic" ] || continue
+                case "$topic" in ''|*[!a-zA-Z0-9_-]*|[-_]*) continue ;; esac
+                case "$mac" in *[!a-fA-F0-9:]*|'') mac='' ;; esac
+                # Data is untrusted. Only safe ASCII is placed in the line protocol.
+                name="$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9 _-' | cut -c 1-48)"
+                [ -n "$name" ] || name='Tasmota'
+                printf 'http|%s|%s|%s|%s\n' "$ip" "$mac" "$topic" "$name" >> "$TMP/results"
+            fi
+        done < "$LEASES"
+    done
 fi
 host="$(get jarbis.broker.host)"
 port="$(get jarbis.broker.port)"
