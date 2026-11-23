@@ -11,6 +11,8 @@ BROKER_BIN="${JARBIS_BROKER_BIN:-/usr/libexec/jarbis-broker}"
 CACHE_BIN="${JARBIS_SHELLY_CACHE_BIN:-/usr/libexec/jarbis-shelly-cache}"
 CREDENTIALS="${JARBIS_DEVICE_CREDENTIALS:-/etc/jarbis/device-credentials}"
 DISCOVERY="${JARBIS_DISCOVERY_CACHE:-/tmp/jarbis-discovery.records}"
+SENSOR_CACHE="${JARBIS_SENSOR_TMP_DIR:-/tmp/jarbis-sensors}"
+[ "${JARBIS_TEST_MODE:-}" = 1 ] || [ "$SENSOR_CACHE" = /tmp/jarbis-sensors ] || exit 1
 get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
 fail() { printf '%s\n' "$1" > "$RESULT"; exit 1; }
 valid_ip() {
@@ -82,8 +84,25 @@ rpc() {
         --output "$DIR/response" "http://$IP/rpc" 2>/dev/null || return 1
     [ -s "$DIR/response" ] && [ "$(wc -c < "$DIR/response")" -le 8192 ]
 }
+# A recent report already received by our authenticated local MQTT broker
+# proves the registered sensor is linked. Do not wake, reboot or overwrite a
+# sleeping sensor just to repeat the pairing operation. Never use flash
+# backups or HTTP-seeded values as evidence of active MQTT connectivity.
+if [ "$REPLACE" = 0 ] && [ -d "$SENSOR_CACHE" ] && [ ! -L "$SENSOR_CACHE" ] &&
+   [ -f "$SENSOR_CACHE/$DEVICE" ] && [ ! -L "$SENSOR_CACHE/$DEVICE" ]; then
+    IFS='|' read -r old_t old_h old_b old_time old_source < "$SENSOR_CACHE/$DEVICE" || :
+    case "$old_time" in ''|*[!0-9]*) old_time=0 ;; esac
+    now="$(date +%s)"
+    case "$now" in ''|*[!0-9]*) now=0 ;; esac
+    if [ "$old_source" = mqtt ] && [ "${#old_time}" -eq 10 ] &&
+       [ "$now" -ge "$old_time" ] && [ $((now - old_time)) -le 10800 ] &&
+       { [ -n "$old_t" ] || [ -n "$old_h" ] || [ -n "$old_b" ]; }; then
+        printf '%s\n' OBSERVED > "$RESULT"
+        exit 0
+    fi
+fi
 # An asleep battery sensor cannot be woken over HTTP. Ask for a short button
-# press, rather than guessing credentials or reconfiguring a DHCP-only record.
+# press only when we have no recent verified MQTT report.
 rpc Shelly.GetDeviceInfo || fail WAKE_REQUIRED
 ID="$(json '@.id')"; INFO_MAC="$(json '@.mac')"; MODEL="$(json '@.model')"
 GEN="$(json '@.gen')"; APP="$(json '@.app')"; AUTH="$(json '@.auth_en')"

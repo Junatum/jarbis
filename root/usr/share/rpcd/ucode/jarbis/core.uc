@@ -27,7 +27,7 @@ export function status(checker) {
         }
         return success({
             apiVersion: 1,
-            version: '0.2.3-r3',
+            version: '0.2.3-r4',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',

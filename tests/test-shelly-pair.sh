@@ -115,7 +115,27 @@ run 0
 [ "$success" = 1 ] && [ "$result" = OBSERVED ] || fail 'already configured sensor failed'
 ! grep -Eq 'MQTT.SetConfig|Shelly.Reboot' "$MOCK_LOG" || fail 'unnecessary sensor reconfiguration'
 unset MOCK_ALREADY
+# Once a validated MQTT report has arrived, re-pairing while the sensor
+# sleeps must be a no-op. An HTTP snapshot alone is not MQTT evidence.
 MOCK_ASLEEP=1; export MOCK_ASLEEP
+now="$(date +%s)"
+printf '24.3|54|100|%s|mqtt\n' "$now" > "$TMP/cache/sensor"
+run 0
+[ "$success" = 1 ] && [ "$result" = OBSERVED ] || fail 'recent MQTT sensor treated as sleeping error'
+[ ! -s "$MOCK_LOG" ] || fail 'already reporting sensor was unnecessarily contacted over HTTP'
+# Old MQTT reports and HTTP-only first readings cannot bypass pairing.
+printf '24.3|54|100|%s|mqtt\n' "$((now - 10801))" > "$TMP/cache/sensor"
+run 0
+[ "$success" = 0 ] && [ "$result" = WAKE_REQUIRED ] || fail 'old MQTT report treated as current connection'
+printf '24.3|54|100|%s|http\n' "$now" > "$TMP/cache/sensor"
+run 0
+[ "$success" = 0 ] && [ "$result" = WAKE_REQUIRED ] || fail 'HTTP seed wrongly trusted as MQTT connection'
+# An explicit broker replacement must not silently reuse the cached report.
+printf '24.3|54|100|%s|mqtt\n' "$now" > "$TMP/cache/sensor"
+run 1
+[ "$success" = 0 ] && [ "$result" = WAKE_REQUIRED ] || fail 'approved override bypassed HTTP reconfiguration'
+# With no active MQTT report the sensor still needs a wakeup.
+rm -f "$TMP/cache/sensor"
 run 0
 [ "$success" = 0 ] && [ "$result" = WAKE_REQUIRED ] || fail 'sleep did not provide a clear retry reason'
 ! grep -q 'MQTT.SetConfig' "$MOCK_LOG" || fail 'sleeping device was modified'
