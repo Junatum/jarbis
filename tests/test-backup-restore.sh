@@ -5,7 +5,8 @@ ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 KEEP="$ROOT/root/lib/upgrade/keep.d/jarbis"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 [ -f "$KEEP" ] || fail 'keep.d for sysupgrade is missing'
-[ "$(grep -v '^#' "$KEEP" | sed '/^$/d' | wc -l)" -eq 5 ] || fail 'keep.d must declare only user settings and MQTT credentials'
+[ "$(grep -v '^#' "$KEEP" | sed '/^$/d' | wc -l)" -eq 6 ] || fail 'keep.d must declare settings, MQTT credentials and sensor snapshots'
+grep -Fxq '/etc/jarbis/sensor-cache/' "$KEEP" || fail 'sensor cache backup missing'
 grep -Fxq '/etc/config/jarbis' "$KEEP" || fail 'UCI device settings must be retained'
 grep -Fxq '/etc/jarbis/mosquitto_pub' "$KEEP" || fail 'MQTT credentials must be retained'
 for path in /etc/jarbis/mosquitto_sub /etc/jarbis/device-credentials /etc/mosquitto/jarbis.passwd; do
@@ -22,7 +23,7 @@ for path in ['/etc/config/jarbis','/etc/jarbis/mosquitto_pub','/etc/jarbis/mosqu
 PYTEST
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/jarbis-keep.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-mkdir -p "$TMP/source/etc/config" "$TMP/source/etc/jarbis" "$TMP/source/etc/mosquitto" "$TMP/restore"
+mkdir -p "$TMP/source/etc/config" "$TMP/source/etc/jarbis" "$TMP/source/etc/mosquitto" "$TMP/source/etc/jarbis/sensor-cache" "$TMP/restore"
 cat > "$TMP/source/etc/config/jarbis" <<'CONFIG'
 config core 'main'
     option enabled '1'
@@ -35,18 +36,21 @@ printf '%s\n' '-u light-user' '-P secret-value-keep-private' > "$TMP/source/etc/
 cp "$TMP/source/etc/jarbis/mosquitto_pub" "$TMP/source/etc/jarbis/mosquitto_sub"
 printf '%s\n' 'username=jarbis' 'password=secret' > "$TMP/source/etc/jarbis/device-credentials"
 printf '%s\n' 'jarbis:$7$sha512$hashed' > "$TMP/source/etc/mosquitto/jarbis.passwd"
+printf '22.4|52|80|1700000000\n' > "$TMP/source/etc/jarbis/sensor-cache/shelly_study"
 chmod 600 "$TMP/source/etc/jarbis/mosquitto_pub"
 # Simulate OpenWrt archive selection from the actual sysupgrade keep.d rules.
 # This fixture does not claim to replace full sysupgrade tests on a router.
 while IFS= read -r path; do
     case "$path" in ''|'#'*) continue ;; esac
-    [ -f "$TMP/source$path" ] || fail "missing backup fixture $path"
+    case "$path" in */) [ -d "$TMP/source$path" ] || fail "missing backup fixture $path" ;;
+        *) [ -f "$TMP/source$path" ] || fail "missing backup fixture $path" ;; esac
 done < "$KEEP"
 (
     cd "$TMP/source"
-    tar -czf "$TMP/backup.tgz" etc/config/jarbis etc/jarbis/mosquitto_pub etc/jarbis/mosquitto_sub etc/jarbis/device-credentials etc/mosquitto/jarbis.passwd
+    tar -czf "$TMP/backup.tgz" etc/config/jarbis etc/jarbis/mosquitto_pub etc/jarbis/mosquitto_sub etc/jarbis/device-credentials etc/mosquitto/jarbis.passwd etc/jarbis/sensor-cache
 )
 tar -xzf "$TMP/backup.tgz" -C "$TMP/restore"
+cmp "$TMP/source/etc/jarbis/sensor-cache/shelly_study" "$TMP/restore/etc/jarbis/sensor-cache/shelly_study" || fail 'sensor cache restore lost'
 cmp "$TMP/source/etc/config/jarbis" "$TMP/restore/etc/config/jarbis" || fail 'restored devices differ'
 cmp "$TMP/source/etc/jarbis/mosquitto_pub" "$TMP/restore/etc/jarbis/mosquitto_pub" || fail 'restored credentials differ'
 for file in etc/jarbis/mosquitto_sub etc/jarbis/device-credentials etc/mosquitto/jarbis.passwd; do

@@ -17,7 +17,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 [ -f "$ROOT/root/usr/share/rpcd/acl.d/jarbis.json" ] || fail 'ACL missing'
 [ -f "$ROOT/root/lib/upgrade/keep.d/jarbis" ] || fail 'keep.d missing'
 [ -f "$ROOT/root/etc/config/jarbis" ] || fail 'default UCI config missing'
-sh -n "$ROOT/root/usr/libexec/jarbis-state" "$ROOT/root/usr/libexec/jarbis-control" "$ROOT/root/usr/libexec/jarbis-broker" "$ROOT/root/usr/libexec/jarbis-manage" "$ROOT/root/usr/libexec/jarbis-discover" "$ROOT/root/usr/libexec/jarbis-pair" "$ROOT/root/etc/init.d/jarbis" "$ROOT/root/usr/libexec/jarbis-rpcd-reconcile" || fail 'invalid router shell syntax'
+sh -n "$ROOT/root/usr/libexec/jarbis-shelly-listen" "$ROOT/root/usr/libexec/jarbis-shelly-cache" "$ROOT/root/usr/libexec/jarbis-state" "$ROOT/root/usr/libexec/jarbis-control" "$ROOT/root/usr/libexec/jarbis-broker" "$ROOT/root/usr/libexec/jarbis-manage" "$ROOT/root/usr/libexec/jarbis-discover" "$ROOT/root/usr/libexec/jarbis-pair" "$ROOT/root/etc/init.d/jarbis" "$ROOT/root/usr/libexec/jarbis-rpcd-reconcile" || fail 'invalid router shell syntax'
 python3 - "$ROOT" <<'PYTEST'
 from pathlib import Path
 import json, re, sys
@@ -31,6 +31,8 @@ paths = {
   'root/usr/libexec/jarbis-manage': 'INSTALL_BIN',
   'root/usr/libexec/jarbis-discover': 'INSTALL_BIN',
   'root/usr/libexec/jarbis-pair': 'INSTALL_BIN',
+  'root/usr/libexec/jarbis-shelly-listen': 'INSTALL_BIN',
+  'root/usr/libexec/jarbis-shelly-cache': 'INSTALL_BIN',
   'root/etc/init.d/jarbis': 'INSTALL_BIN',
   'root/usr/libexec/jarbis-rpcd-reconcile': 'INSTALL_BIN',
   'root/usr/share/rpcd/ucode/jarbis.uc': 'INSTALL_DATA',
@@ -53,7 +55,7 @@ read = set(acl['jarbis']['read']['ubus']['jarbis'])
 write = set(acl['jarbis']['write']['ubus']['jarbis'])
 require(actual == (read | write), 'RPC methods must match ACL grants exactly')
 require(not (read & write), 'read/write ACL must not overlap')
-require(read == {'status','devices_list','discovery_list','light_state'} and write == {'light_set','discovery_scan','settings_update','device_add','device_update','device_remove','broker_credentials','device_pair'}, 'unexpected RPC method privilege')
+require(read == {'status','devices_list','discovery_list','light_state','sensor_state'} and write == {'light_set','discovery_scan','settings_update','device_add','device_update','device_remove','broker_credentials','device_pair'}, 'unexpected RPC method privilege')
 require('unauthenticated' not in json.dumps(acl), 'ACL must not grant anonymous access')
 PYTEST
 printf 'PASS: 패키지 설치 대상·실행 권한·RPC ACL·의존성 및 기본 보안 계약\n'

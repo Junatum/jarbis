@@ -27,14 +27,14 @@ export function status(checker) {
         }
         return success({
             apiVersion: 1,
-            version: '0.2.3-r1',
+            version: '0.2.3-r2',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',
             brokerHost: cfg.get('jarbis', 'broker', 'mode') == 'managed' ? (cfg.get('jarbis', 'broker', 'lan_ip') ?? cfg.get('network', 'lan', 'ipaddr') ?? '') : (cfg.get('jarbis', 'broker', 'host') ?? ''),
             brokerPort: cfg.get('jarbis', 'broker', 'port') ?? '1883',
             brokerReady: connected,
-            features: { lightControl: true, discovery: true, mqttDiscovery: true, automation: false, ai: false },
+            features: { lightControl: true, discovery: true, mqttDiscovery: true, shellyHtg3: true, automation: false, ai: false },
         });
     }
     catch (e) { return failure('CONFIG_UNAVAILABLE', 'Jarbis 설정을 읽지 못했습니다.'); }
@@ -57,7 +57,9 @@ export function devices_list() {
                 topic: dev.topic ?? '',
                 enabled: dev.enabled == '1',
                 capabilities: dev.kind == 'light' && dev.protocol == 'tasmota'
-                    ? ['power', 'brightness', 'color', 'color_temperature'] : [],
+                    ? ['power', 'brightness', 'color', 'color_temperature'] :
+                    dev.kind == 'sensor' && dev.protocol == 'shelly_htg3'
+                    ? ['temperature', 'humidity', 'battery'] : [],
             });
         });
         return success({ devices: result });
@@ -157,6 +159,51 @@ export function light_state(request, executor, fsops) {
     });
 };
 
+// Passive Shelly sensor state. Never polls or wakes the battery device.
+// The root-owned listener writes a validated fixed-width line; the RPC only
+// returns bounded numeric fields and never exposes broker credentials.
+export function sensor_state(request, reader) {
+    const id = request?.args?.id;
+    if (!device_id(id)) return failure('INVALID_DEVICE', '기기 ID가 올바르지 않습니다.');
+    const cfg = config_cursor();
+    if (!cfg) return failure('CONFIG_UNAVAILABLE', '기기 설정을 읽지 못했습니다.');
+    try {
+        if (cfg.get('jarbis', id) != 'device' ||
+            cfg.get('jarbis', id, 'protocol') != 'shelly_htg3' ||
+            cfg.get('jarbis', id, 'kind') != 'sensor' ||
+            cfg.get('jarbis', id, 'enabled') != '1')
+            return failure('INVALID_DEVICE', '등록된 Shelly 센서가 아닙니다.');
+    } catch (e) { return failure('INVALID_DEVICE', '등록된 Shelly 센서가 아닙니다.'); }
+    const empty = { id: id, observed: false, source: null, temperatureC: null,
+                    humidityPercent: null, batteryPercent: null, lastSeen: null };
+    let raw = null;
+    try {
+        const path = '/tmp/jarbis-sensors/' + id;
+        raw = type(reader) == 'function' ? reader(path, 128) : readfile(path, 128);
+        if (!raw) {
+            const backup = '/etc/jarbis/sensor-cache/' + id;
+            raw = type(reader) == 'function' ? reader(backup, 128) : readfile(backup, 128);
+        }
+    } catch (e) { return success(empty); }
+    if (!raw || length(raw) > 128) return success(empty);
+    const fields = split(trim(raw), '|');
+    if (length(fields) != 4 || match(fields[3], /^[0-9]{10}$/) == null ||
+        +fields[3] < 1700000000) return success(empty);
+    function bounded(rawValue, lower, upper) {
+        if (rawValue == '') return null;
+        if (match(rawValue, /^-?[0-9]{1,3}(\.[0-9]{1,2})?$/) == null) return null;
+        const value = +rawValue;
+        return value >= lower && value <= upper ? value : null;
+    };
+    const t = bounded(fields[0], -40, 125);
+    const h = bounded(fields[1], 0, 100);
+    const b = bounded(fields[2], 0, 100);
+    if (t == null && h == null && b == null) return success(empty);
+    return success({ id: id, observed: true, source: 'mqtt',
+                     temperatureC: t, humidityPercent: h, batteryPercent: b,
+                     lastSeen: +fields[3] });
+};
+
 // The cache contains only validated, non-secret candidate fields. It is not a
 // registry and never grants control of a discovered device.
 export function discovery_list(reader) {
@@ -167,8 +214,8 @@ export function discovery_list(reader) {
     let registered = {};
     try {
         cfg.foreach('jarbis', 'device', function(dev) {
-            if (type(dev.topic) == 'string' && dev.protocol == 'tasmota')
-                registered[dev.topic] = true;
+            if (type(dev.topic) == 'string' && (dev.protocol == 'tasmota' || dev.protocol == 'shelly_htg3'))
+                registered[dev.protocol + ':' + dev.topic] = true;
         });
         const raw = (type(reader) == 'function'
             ? reader('/tmp/jarbis-discovery.records', 8192)
@@ -178,16 +225,21 @@ export function discovery_list(reader) {
             if (length(fields) != 5) continue;
             const source = fields[0], ip = fields[1], mac = fields[2];
             const topic = fields[3], name = fields[4];
-            if (source != 'http' && source != 'mqtt') continue;
+            if (source != 'http' && source != 'mqtt' && source != 'shelly-http') continue;
             if (topic && match(topic, /^[A-Za-z0-9_-]{1,96}$/) == null) continue;
             if (ip && match(ip, /^[0-9.]{7,15}$/) == null) continue;
             if (mac && match(mac, /^[a-fA-F0-9:]{12,17}$/) == null) continue;
             if (match(name, /^[A-Za-z0-9 _-]{1,48}$/) == null) continue;
-            let key = ip || mac || topic;
+            const shelly = source == 'shelly-http';
+            if (shelly && match(topic, /^shellyhtg3-[A-Fa-f0-9]{12}$/) == null) continue;
+            let key = (shelly ? 'shelly:' : 'tasmota:') + (ip || mac || topic);
             if (!key || seen[key]) continue;
             seen[key] = true;
-            push(entries, { protocol: 'tasmota', source: source, ip: ip,
-                            mac: mac, topic: topic, name: name, registered: !!registered[topic] });
+            const protocol = shelly ? 'shelly_htg3' : 'tasmota';
+            push(entries, { protocol: protocol, kind: shelly ? 'sensor' : 'light',
+                            source: shelly ? 'http' : source, ip: ip,
+                            mac: mac, topic: topic, name: name,
+                            registered: !!registered[protocol + ':' + topic] });
             if (length(entries) >= 32) break;
         }
         return success({ devices: entries });
@@ -259,9 +311,15 @@ export function settings_update(request, executor, errorReader) {
 
 export function device_add(request, executor) {
     const args = request?.args ?? {};
-    if (!device_id(args.id) || !device_name(args.name) || !device_topic(args.topic))
+    const shelly = args.protocol == 'shelly_htg3' && args.kind == 'sensor';
+    if ((!shelly && args.protocol != null && args.protocol != '' && args.protocol != 'tasmota') ||
+        (!shelly && args.kind != null && args.kind != '' && args.kind != 'light') ||
+        !device_id(args.id) || !device_name(args.name) || !device_topic(args.topic) ||
+        (shelly && match(args.topic, /^shellyhtg3-[A-Fa-f0-9]{12}$/) == null))
         return failure('INVALID_DEVICE', '기기 이름, ID 또는 MQTT Topic을 확인해 주세요.');
-    if (!managed_command(['device-add', args.id, args.name, args.topic], executor))
+    const command = ['device-add', args.id, args.name, args.topic];
+    if (shelly) push(command, 'shelly_htg3');
+    if (!managed_command(command, executor))
         return failure('DEVICE_ADD_FAILED', '발견한 기기를 등록하지 못했습니다. 다시 검색해 주세요.');
     return success({ id: args.id, added: true });
 };

@@ -1,0 +1,30 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# procd-supervised, MQTT push only. No network polling or cloud access.
+set -eu
+umask 077
+UCI_BIN="${JARBIS_UCI_BIN:-uci}"
+SUB_BIN="${JARBIS_MQTT_SUB_BIN:-mosquitto_sub}"
+CACHE_BIN="${JARBIS_SHELLY_CACHE_BIN:-/usr/libexec/jarbis-shelly-cache}"
+CONFIG_DIR="${JARBIS_MQTT_CONFIG_DIR:-/etc/jarbis}"
+get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
+[ "$(get jarbis.main.enabled)" = 1 ] || exit 0
+host="$(get jarbis.broker.host)"; port="$(get jarbis.broker.port)"
+case "$host" in ''|-*|*[!a-zA-Z0-9.:_-]*) exit 1 ;; esac
+case "$port" in ''|*[!0-9]*) exit 1 ;; esac
+[ "$port" -ge 1 ] 2>/dev/null && [ "$port" -le 65535 ] 2>/dev/null || exit 1
+[ "$CONFIG_DIR" = /etc/jarbis ] || [ "${JARBIS_TEST_MODE:-}" = 1 ] || exit 1
+[ -f "$CONFIG_DIR/mosquitto_sub" ] && [ ! -L "$CONFIG_DIR/mosquitto_sub" ] || exit 1
+[ "$(LC_ALL=C ls -ld "$CONFIG_DIR/mosquitto_sub" | cut -c 1-10)" = '-rw-------' ] || exit 1
+# -R rejects retained MQTT messages: otherwise a replay would change lastSeen.
+# Subscribe to standard Shelly topics; cache helper checks exact registered
+# Shelly device and topic before persisting anything.
+XDG_CONFIG_HOME="$CONFIG_DIR" HOME="$CONFIG_DIR"     "$SUB_BIN" -h "$host" -p "$port" -v -R     -t '+/events/rpc' -t '+/status/temperature:0'     -t '+/status/humidity:0' -t '+/status/devicepower:0' |
+while IFS= read -r line; do
+    [ "${#line}" -le 4200 ] || continue
+    topic="${line%% *}"
+    [ "$topic" != "$line" ] || continue
+    payload="${line#* }"
+    [ "${#payload}" -le 4096 ] || continue
+    printf '%s' "$payload" | "$CACHE_BIN" ingest "$topic" >/dev/null 2>&1 || :
+done

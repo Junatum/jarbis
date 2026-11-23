@@ -81,6 +81,34 @@ if [ -n "$prefix" ] && [ -f "$LEASES" ]; then
                 fi
                 ;;
         esac
+        # Battery Shelly sensors are reachable via HTTP only briefly after
+        # waking. Probe known Shelly DHCP hostnames with a read-only RPC,
+        # using the same bounded candidate set and timeout budget.
+        case "$hostname" in
+            ShellyHTG3-*|shellyhtg3-*)
+                if "$HTTP_BIN" --disable --fail --silent --show-error --location --max-redirs 0 \
+                    --noproxy '*' --proto '=http' --connect-timeout 1 \
+                    --max-time 1 --max-filesize 4096 --output "$TMP/shelly" \
+                    "http://$ip/rpc/Shelly.GetDeviceInfo" >/dev/null 2>&1; then
+                    model="$(jsonfilter -i "$TMP/shelly" -e '@.model' 2>/dev/null || :)"
+                    app="$(jsonfilter -i "$TMP/shelly" -e '@.app' 2>/dev/null || :)"
+                    gen="$(jsonfilter -i "$TMP/shelly" -e '@.gen' 2>/dev/null || :)"
+                    sid="$(jsonfilter -i "$TMP/shelly" -e '@.id' 2>/dev/null || :)"
+                    case "$sid" in shellyhtg3-*) ;; *) sid='' ;; esac
+                    suffix="${sid#shellyhtg3-}"
+                    case "$suffix" in ''|*[!a-fA-F0-9]*) sid='' ;; esac
+                    [ "${#suffix}" -eq 12 ] || sid=''
+                    mac_hex="$(printf '%s' "$mac" | tr -d ':' | tr A-F a-f)"
+                    suffix_lower="$(printf '%s' "$suffix" | tr A-F a-f)"
+                    if [ "$model" = S3SN-0U12A ] && [ "$app" = HTG3 ] &&
+                        [ "$gen" = 3 ] && [ -n "$sid" ] && [ "$suffix_lower" = "$mac_hex" ]; then
+                        printf 'shelly-http|%s|%s|shellyhtg3-%s|Shelly H&T Gen3\n' \
+                            "$ip" "$mac" "$suffix_lower" >> "$TMP/results"
+                    fi
+                fi
+                continue
+                ;;
+        esac
         # No redirects or proxies: a DHCP lease must not cause a second
         # request to a different host. Limit response size before parsing.
         if "$HTTP_BIN" --disable --fail --silent --show-error --location --max-redirs 0 \

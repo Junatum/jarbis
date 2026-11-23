@@ -64,11 +64,22 @@ case "$1" in
             "$UCI_BIN" set "jarbis.main.enabled=$2"
             "$UCI_BIN" commit jarbis
         }
-        # Deliberately do not stop a shared Mosquitto on disable.
+        # procd starts/stops the Shelly MQTT reader on activation changes.
+        if [ -x "$INIT" ]; then
+            if [ "$2" = 1 ]; then "$INIT" start >/dev/null 2>&1 || :
+            else "$INIT" stop >/dev/null 2>&1 || :; fi
+        fi
         ;;
     device-add)
-        [ "$#" -eq 4 ] || fail 'invalid arguments'
+        [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || fail 'invalid arguments'
         id="$2"; name="$3"; topic="$4"
+        protocol="${5:-tasmota}"
+        case "$protocol" in tasmota|shelly_htg3) ;; *) fail 'unsupported device protocol' ;; esac
+        if [ "$protocol" = shelly_htg3 ]; then
+            suffix="${topic#shellyhtg3-}"
+            [ "$suffix" != "$topic" ] && [ "${#suffix}" -eq 12 ] || fail 'invalid Shelly topic'
+            case "$suffix" in *[!a-fA-F0-9]*) fail 'invalid Shelly topic' ;; esac
+        fi
         valid_id "$id" && valid_name "$name" && valid_topic "$topic" || fail 'invalid device'
         [ "$(get jarbis.main.enabled)" = 1 ] || fail 'Jarbis disabled'
         [ -z "$(get "jarbis.$id")" ] || fail 'device ID already registered'
@@ -76,7 +87,9 @@ case "$1" in
         found=0
         while IFS='|' read -r source ip mac known title; do
             if [ "$known" = "$topic" ]; then
-                case "$source" in http|mqtt) found=1; break ;; esac
+                case "$protocol:$source" in
+                    tasmota:http|tasmota:mqtt|shelly_htg3:shelly-http) found=1; break ;;
+                esac
             fi
         done < "$CACHE"
         [ "$found" = 1 ] || fail 'topic not in discovery list'
@@ -87,10 +100,19 @@ case "$1" in
         "$UCI_BIN" set "jarbis.$id=device"
         "$UCI_BIN" set "jarbis.$id.enabled=1"
         "$UCI_BIN" set "jarbis.$id.name=$name"
-        "$UCI_BIN" set "jarbis.$id.kind=light"
-        "$UCI_BIN" set "jarbis.$id.protocol=tasmota"
+        if [ "$protocol" = shelly_htg3 ]; then
+            "$UCI_BIN" set "jarbis.$id.kind=sensor"
+        else
+            "$UCI_BIN" set "jarbis.$id.kind=light"
+        fi
+        "$UCI_BIN" set "jarbis.$id.protocol=$protocol"
         "$UCI_BIN" set "jarbis.$id.topic=$topic"
         "$UCI_BIN" commit jarbis
+        # Re-enter the service only for Shelly registration. Broker check
+        # avoids restarting working Tasmota connections.
+        if [ "$protocol" = shelly_htg3 ] && [ -x "$INIT" ]; then
+            "$INIT" start >/dev/null 2>&1 || :
+        fi
         ;;
     device-update)
         [ "$#" -eq 4 ] || fail 'invalid arguments'

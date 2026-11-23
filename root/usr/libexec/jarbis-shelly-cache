@@ -1,0 +1,128 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Validate registered Shelly MQTT reports and persist modest rate-limited snapshots.
+set -eu
+umask 077
+UCI_BIN="${JARBIS_UCI_BIN:-uci}"
+JSON_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
+TMP_DIR="${JARBIS_SENSOR_TMP_DIR:-/tmp/jarbis-sensors}"
+BACKUP_DIR="${JARBIS_SENSOR_BACKUP_DIR:-/etc/jarbis/sensor-cache}"
+[ "${JARBIS_TEST_MODE:-}" = 1 ] || {
+    [ "$TMP_DIR" = /tmp/jarbis-sensors ] && [ "$BACKUP_DIR" = /etc/jarbis/sensor-cache ] || exit 1
+}
+get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
+valid_decimal() {
+    # Exact fixed-length decimals, no NaN, signs other than leading minus,
+    # exponents, command substitution, pipes or unbounded numbers.
+    printf '%s\n' "$1" | awk -v lo="$2" -v hi="$3" '
+      /^-?[0-9]+(\.[0-9]+)?$/ {
+        if (length($1) <= 7 && $1 >= lo && $1 <= hi) ok=1
+      }
+      END { exit !ok }'
+}
+read_value() { "$JSON_BIN" -i "$PAYLOAD_FILE" -e "$1" 2>/dev/null || :; }
+[ "$#" -eq 2 ] && [ "$1" = ingest ] || exit 1
+topic="$2"
+case "$topic" in
+    */events/rpc) prefix="${topic%/events/rpc}"; kind=rpc ;;
+    */status/temperature:0) prefix="${topic%/status/temperature:0}"; kind=temp ;;
+    */status/humidity:0) prefix="${topic%/status/humidity:0}"; kind=humid ;;
+    */status/devicepower:0) prefix="${topic%/status/devicepower:0}"; kind=battery ;;
+    *) exit 1 ;;
+esac
+suffix="${prefix#shellyhtg3-}"
+[ "$suffix" != "$prefix" ] && [ "${#suffix}" -eq 12 ] || exit 1
+case "$suffix" in *[!a-fA-F0-9]*) exit 1 ;; esac
+prefix="$(printf '%s' "$prefix" | tr A-F a-f)"
+[ "$(get jarbis.main.enabled)" = 1 ] || exit 1
+id=''
+# Enumerate only configured device sections; never derive a filesystem path
+# from a user-controlled MQTT topic.
+for section in $("$UCI_BIN" -q show jarbis 2>/dev/null | sed -n 's/^jarbis\.\([A-Za-z_][A-Za-z0-9_]*\)=device$/\1/p' | head -n 64); do
+    if [ "$(get "jarbis.$section.protocol")" = shelly_htg3 ] &&
+       [ "$(get "jarbis.$section.kind")" = sensor ] &&
+       [ "$(get "jarbis.$section.enabled")" = 1 ] &&
+       [ "$(printf '%s' "$(get "jarbis.$section.topic")" | tr A-F a-f)" = "$prefix" ]; then
+        id="$section"; break
+    fi
+done
+[ -n "$id" ] || exit 1
+PAYLOAD_FILE="$(mktemp /tmp/jarbis-shelly.XXXXXX)" || exit 1
+trap 'rm -f "$PAYLOAD_FILE"' EXIT HUP INT TERM
+head -c 4097 > "$PAYLOAD_FILE"
+[ "$(wc -c < "$PAYLOAD_FILE")" -le 4096 ] && [ -s "$PAYLOAD_FILE" ] || exit 1
+if [ "$kind" = rpc ]; then
+    method="$(read_value '@.method')"
+    case "$method" in NotifyFullStatus|NotifyStatus) ;; *) exit 1 ;; esac
+    src="$(read_value '@.src')"
+    [ "$(printf '%s' "$src" | tr A-F a-f)" = "$prefix" ] || exit 1
+    temperature="$(read_value '@.params["temperature:0"].tC')"
+    humidity="$(read_value '@.params["humidity:0"].rh')"
+    battery="$(read_value '@.params["devicepower:0"].battery.percent')"
+else
+    temperature=''; humidity=''; battery=''
+    case "$kind" in
+        temp) temperature="$(read_value '@.tC')" ;;
+        humid) humidity="$(read_value '@.rh')" ;;
+        battery) battery="$(read_value '@.battery.percent')" ;;
+    esac
+fi
+# Whitelist only valid and physically plausible sensor readings.
+new=0
+if [ -n "$temperature" ]; then
+    if valid_decimal "$temperature" -40 125; then new=1; else temperature=''; fi
+fi
+if [ -n "$humidity" ]; then
+    if valid_decimal "$humidity" 0 100; then new=1; else humidity=''; fi
+fi
+if [ -n "$battery" ]; then
+    if valid_decimal "$battery" 0 100; then new=1; else battery=''; fi
+fi
+[ "$new" -eq 1 ] || exit 1
+now="$(date +%s)"
+case "$now" in ''|*[!0-9]*) exit 1 ;; esac
+[ "$now" -ge 1700000000 ] || exit 1
+mkdir -p "$TMP_DIR" || exit 1
+[ ! -L "$TMP_DIR" ] && [ ! -L "$BACKUP_DIR" ] || exit 1
+[ "$(LC_ALL=C ls -ld "$TMP_DIR" | cut -c 1-10)" = 'drwx------' ] || exit 1
+file="$TMP_DIR/$id"; backup="$BACKUP_DIR/$id"
+old_t=''; old_h=''; old_b=''; old_time=''
+# Serialise per device with atomic lock; never truncate a live measurement.
+lock="$TMP_DIR/.$id.lock"
+mkdir "$lock" 2>/dev/null || exit 1
+trap 'rm -f "$PAYLOAD_FILE"; rmdir "$lock"' EXIT HUP INT TERM
+if [ -f "$file" ] && [ ! -L "$file" ]; then
+    IFS='|' read -r old_t old_h old_b old_time < "$file" || :
+elif [ -f "$backup" ] && [ ! -L "$backup" ]; then
+    IFS='|' read -r old_t old_h old_b old_time < "$backup" || :
+fi
+# Do not use untrusted data as paths; even a damaged cache cannot inject a value.
+valid_decimal "$old_t" -40 125 || old_t=''
+valid_decimal "$old_h" 0 100 || old_h=''
+valid_decimal "$old_b" 0 100 || old_b=''
+case "$old_time" in ''|*[!0-9]*) old_time=0 ;; esac
+[ -n "$temperature" ] || temperature="$old_t"
+[ -n "$humidity" ] || humidity="$old_h"
+[ -n "$battery" ] || battery="$old_b"
+new_file="$(mktemp "$TMP_DIR/.sensor.XXXXXX")" || exit 1
+printf '%s|%s|%s|%s\n' "$temperature" "$humidity" "$battery" "$now" > "$new_file"
+chmod 600 "$new_file"
+mv -f "$new_file" "$file"
+# Flash writes are deliberately limited: first valid report and one snapshot
+# every 6h per sensor, avoiding a write on each 5min USB-powered update.
+write_backup=1
+if [ -f "$backup" ] && [ ! -L "$backup" ]; then
+    saved_time="$(cut -d '|' -f 4 "$backup" 2>/dev/null || :)"
+    case "$saved_time" in ''|*[!0-9]*) saved_time=0 ;; esac
+    [ "${#saved_time}" -le 10 ] || saved_time=0
+    if [ "$now" -ge "$saved_time" ] && [ $((now - saved_time)) -lt 21600 ]; then write_backup=0; fi
+fi
+if [ "$write_backup" = 1 ]; then
+    mkdir -p "$BACKUP_DIR" || exit 0
+    [ ! -L "$BACKUP_DIR" ] && [ ! -L "$backup" ] || exit 0
+    [ "$(LC_ALL=C ls -ld "$BACKUP_DIR" | cut -c 1-10)" = 'drwx------' ] || exit 0
+    saved="$(mktemp "$BACKUP_DIR/.sensor.XXXXXX")" || exit 0
+    printf '%s|%s|%s|%s\n' "$temperature" "$humidity" "$battery" "$now" > "$saved"
+    chmod 600 "$saved"
+    mv -f "$saved" "$backup"
+fi

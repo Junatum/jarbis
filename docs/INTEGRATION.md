@@ -47,3 +47,22 @@ ubus call jarbis status '{}'
 - Apps의 승인 카탈로그/서명된 패키지/펌웨어별 복원 정책을 만족하는지 확인. Jarbis를 별도의 LuCI 앱으로 중복 등록하지 않기
 - 신규 설치 비활성화, 기존 UCI/인증 정보 보존, 기존 Mosquitto 충돌 시 비파괴 동작, rpcd ACL 재적용 확인
 - WAN으로 1883 포트를 열지 않았는지, 관리자에게만 자격 증명 조회가 허용되는지 점검
+
+## Shelly H&T Gen3 (0.2.3-r2)
+
+1. Shelly를 공유기 Wi-Fi에 연결하고 버튼을 눌러 설정 모드로 깨웁니다.
+2. Shelly의 로컬 웹 UI에서 MQTT를 활성화하고 Jarbis Broker 주소(공유기 LAN IP), 포트 `1883`,
+   `broker_credentials`에서 확인한 사용자 이름·비밀번호를 설정합니다. `RPC status notifications`를 켭니다.
+   기존 MQTT 연결을 자동으로 덮어쓰지 않습니다. 본 버전은 기본 MQTT topic prefix
+   `shellyhtg3-<12자리 MAC>`만 지원합니다. `status_ntf`는 선택사항입니다.
+3. 스마트홈의 기기 검색으로 `ShellyHTG3-...` DHCP 호스트명을 가진 켜진 센서를 검색하고 승인해 등록합니다.
+   배터리 절전 중 검색되지 않으면 기기 버튼을 눌러 깨운 후 재검색합니다.
+4. 등록 후 기기를 다시 깨워 MQTT 보고를 수신시키면 온도·습도·배터리 카드가 표시됩니다.
+   센서의 기본 `NotifyFullStatus`/`NotifyStatus` 및 선택형 MQTT component status를 인식합니다.
+5. `sensor_state`는 마지막 MQTT 수신값을 보여주며 배터리 기기를 강제로 깨우거나 폴링하지 않습니다.
+   재부팅용 `/etc/jarbis/sensor-cache/` 백업은 센서별 최대 6시간마다 갱신되므로
+   재부팅 직전 최신 보고는 유실될 수 있습니다. `lastSeen`은 실제 MQTT 수신 시각입니다.
+
+보안: 로컬 승인된 센서 토픽만 캐시되고, 수신 페이로드 최대 4 KiB, 인증 정보는 RPC/로그에 노출되지 않습니다.
+MQTT Broker는 기존 LAN 바인딩·인증 정책을 유지하고 Shelly Cloud는 필수 요구사항이 아닙니다.
+참고: https://shelly-api-docs.shelly.cloud/gen2/Devices/Gen3/ShellyHTG3/

@@ -4,3 +4,4 @@
 /etc/jarbis/mosquitto_sub
 /etc/jarbis/device-credentials
 /etc/mosquitto/jarbis.passwd
+/etc/jarbis/sensor-cache/

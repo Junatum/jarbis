@@ -25,12 +25,17 @@ export function cursor() {
             if (section == 'broker' && option == 'host') return '127.0.0.1';
             if (section == 'broker' && option == 'mode') return 'managed';
             if (section == 'discovery' && option == 'enabled') return '1';
+            if (section == 'study_sensor' && option == null) return 'device';
+            if (section == 'study_sensor' && option == 'enabled') return '1';
+            if (section == 'study_sensor' && option == 'kind') return 'sensor';
+            if (section == 'study_sensor' && option == 'protocol') return 'shelly_htg3';
             return null;
         },
         foreach: function(config, kind, callback) {
             if (config == 'jarbis' && kind == 'device') {
                 callback({ '.name': 'living_room', name: '거실 전구', kind: 'light', protocol: 'tasmota', enabled: '1', password: 'must-not-leak' });
                 callback({ '.name': 'disabled', name: '꺼진 기기', kind: 'light', protocol: 'tasmota', enabled: '0' });
+                callback({ '.name': 'study_sensor', name: '서재 온습도', kind: 'sensor', protocol: 'shelly_htg3', topic: 'shellyhtg3-aabbccddeeff', enabled: '1' });
             }
         },
     };
@@ -47,7 +52,7 @@ export function unlink(path) { return true; };
 export function rmdir(path) { return true; };
 STUB
 cat > "$RUNNER" <<'UCRUN'
-import { status, devices_list, light_set, light_state, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials, device_pair } from './jarbis/core.uc';
+import { status, devices_list, light_set, light_state, sensor_state, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials, device_pair } from './jarbis/core.uc';
 import { set_unavailable } from 'uci';
 let published = null;
 const mock_publish = function(argv, timeout) {
@@ -64,6 +69,9 @@ const result = {
     brokerUserError: settings_update({ args: { enabled: true } }, function() { return 1; }, function() { return 'MOSQUITTO_USER_MISSING\n'; }),
     add: device_add({ args: { id: 'tasmota_aiyato', name: 'AiYaTo Bulb', topic: 'aiyato_cb0735' } }, function(argv) { return argv[1] == 'device-add' ? 0 : 1; }),
     invalidAdd: device_add({ args: { id: '../../broken', name: 'bad', topic: 'home' } }, function() { return 0; }),
+    shellyAdd: device_add({ args: { id: 'study_sensor', name: 'Study Sensor', topic: 'shellyhtg3-aabbccddeeff', protocol: 'shelly_htg3', kind: 'sensor' } },
+      function(argv) { return argv[1] == 'device-add' && argv[5] == 'shelly_htg3' ? 0 : 1; }),
+    shellyBadAdd: device_add({ args: { id: 'study_sensor', name: 'Study Sensor', topic: 'tasmota_CB0735', protocol: 'shelly_htg3', kind: 'sensor' } }, function() { return 0; }),
     update: device_update({ args: { id: 'living_room', name: 'Lamp', enabled: true } }, function(argv) { return argv[1] == 'device-update' ? 0 : 1; }),
     remove: device_remove({ args: { id: 'living_room' } }, function(argv) { return argv[1] == 'device-remove' ? 0 : 1; }),
     credsUnavailable: broker_credentials(function() { return null; }),
@@ -97,6 +105,9 @@ const result = {
                'mqtt|192.168.1.172|40:f5:20:cb:07:35|aiyato_cb0735|AiYaTo\n' +
                'mqtt|192.168.1.23|aa:bb:cc:dd:ee:ff|bad/topic|NotSafe\n';
     }),
+    discoveredShelly: discovery_list(function(path) {
+        return 'shelly-http|192.168.1.20|aa:bb:cc:dd:ee:ff|shellyhtg3-aabbccddeeff|Shelly H&T Gen3\n';
+    }),
     scan: discovery_scan({}, function(argv, timeout) {
         if (timeout != 25000 || argv[0] != '/usr/libexec/jarbis-discover' || argv[1] != 'scan') return 1;
         return 0;
@@ -109,6 +120,15 @@ const result = {
     temperature: light_set({ args: { id: 'living_room', capability: 'color_temperature', value: '300' } }, mock_publish),
     badColor: light_set({ args: { id: 'living_room', capability: 'color', value: '#FF0000' } }, mock_publish),
     badCT: light_set({ args: { id: 'living_room', capability: 'color_temperature', value: '999' } }, mock_publish),
+    sensor: sensor_state({ args: { id: 'study_sensor' } }, function(path, size) {
+        return path == '/tmp/jarbis-sensors/study_sensor' ? '23.4|51.2|85|1700000000\n' : null;
+    }),
+    sensorBackup: sensor_state({ args: { id: 'study_sensor' } }, function(path) {
+        return path == '/etc/jarbis/sensor-cache/study_sensor' ? '24|55||1700000020\n' : null;
+    }),
+    sensorMissing: sensor_state({ args: { id: 'study_sensor' } }, function(path) { return null; }),
+    sensorInvalid: sensor_state({ args: { id: '../../etc/passwd' } }, function() { return '12|12|12|1700000000'; }),
+    sensorNotRegistered: sensor_state({ args: { id: 'living_room' } }, function() { return '12|12|12|1700000000'; }),
     stateInvalidId: light_state({ args: { id: '../../escape' } }, function() {
         invalid_state_executed = true;
         return 0;
@@ -178,11 +198,26 @@ require(status_data.get('features', {}).get('discovery') is True, '발견 지원
 require(status_data.get('brokerMode') == 'managed', 'Broker 모드')
 devices_data = success_data('devices')
 devices = devices_data.get('devices')
-require(isinstance(devices, list) and len(devices) == 2, 'UCI 기기 목록 개수')
+require(isinstance(devices, list) and len(devices) == 3, 'UCI 기기 목록 개수')
 require(devices[0].get('id') == 'living_room', 'UCI 기기 ID')
 require(devices[0].get('capabilities') == ['power', 'brightness', 'color', 'color_temperature'], '지원 capability')
 require('must-not-leak' not in json.dumps(r), 'UCI 비밀값 노출')
+require(any(d['id'] == 'study_sensor' and d['capabilities'] == ['temperature', 'humidity', 'battery'] for d in devices), '센서 capabilities')
+require(success_data('status')['features'].get('shellyHtg3') is True, '센서 지원 capability')
+require(success_data('sensor')['temperatureC'] == 23.4, 'Shelly temperature')
+require(success_data('sensor')['humidityPercent'] == 51.2, 'Shelly humidity')
+require(success_data('sensor')['batteryPercent'] == 85, 'Shelly battery')
+require(success_data('sensor')['lastSeen'] == 1700000000, 'Shelly lastSeen')
+require(success_data('sensorBackup')['humidityPercent'] == 55, 'Shelly backup fallback')
+require(success_data('sensorMissing')['observed'] is False, 'Shelly no readings')
+expect_error('sensorInvalid', 'INVALID_DEVICE')
+expect_error('sensorNotRegistered', 'INVALID_DEVICE')
+require(success_data('shellyAdd')['added'] is True, 'sensor add')
+expect_error('shellyBadAdd', 'INVALID_DEVICE')
 require(len(success_data('discoveredMissing')['devices']) == 0, '캐시 파일이 없는 경우 빈 목록 반환')
+require(success_data('discoveredShelly')['devices'][0]['protocol'] == 'shelly_htg3', 'Shelly discovery protocol')
+require(success_data('discoveredShelly')['devices'][0]['kind'] == 'sensor', 'Shelly discovery kind')
+require(success_data('discoveredShelly')['devices'][0]['registered'] is True, 'Shelly already registered')
 require(len(success_data('discovered')['devices']) == 1, '중복 및 위험 기기 검색 결과 필터링')
 require(len(success_data('scan')['devices']) == 1, '검색 RPC 실행 및 결과 수신')
 require(success_data('on').get('accepted') is True, 'request.args 기반 전원 제어')
