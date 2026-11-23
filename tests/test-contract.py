@@ -47,7 +47,7 @@ class ProjectContracts(unittest.TestCase):
     def test_읽기와_쓰기_ACL은_분리하고_공개하지_않는다(self):
         acl = json.loads((ROOT / "root/usr/share/rpcd/acl.d/jarbis.json").read_text())
         self.assertEqual(acl['jarbis']['read']['ubus']['jarbis'], ['status', 'devices_list', 'light_state', 'discovery_list', 'sensor_state'])
-        self.assertEqual(acl['jarbis']['write']['ubus']['jarbis'], ['light_set', 'discovery_scan', 'settings_update', 'device_add', 'device_update', 'device_remove', 'device_pair', 'broker_credentials'])
+        self.assertEqual(acl['jarbis']['write']['ubus']['jarbis'], ['light_set', 'discovery_scan', 'settings_update', 'device_add', 'device_update', 'device_room_set', 'device_remove', 'device_pair', 'broker_credentials'])
         self.assertNotIn('unauthenticated', json.dumps(acl))
 
     def test_기본값은_비활성화이며_인증된_관리형_MQTT를_선택한다(self):

@@ -65,3 +65,12 @@ ubus call jarbis status '{}'
 보안: 로컬 승인된 센서 토픽만 캐시되고, 수신 페이로드 최대 4 KiB, 인증 정보는 RPC/로그에 노출되지 않습니다.
 MQTT Broker는 기존 LAN 바인딩·인증 정책을 유지하고 Shelly Cloud는 필수 요구사항이 아닙니다.
 참고: https://shelly-api-docs.shelly.cloud/gen2/Devices/Gen3/ShellyHTG3/
+
+## 공간별 기기 관리 (0.2.3-r5)
+
+`status.features.rooms=true`가 있을 때 SmartSafeHub 0.2.34-r6 이상에서 공간 선택을 제공합니다.
+
+- `devices_list`는 각 기기에 `room`을 반환합니다. 기존 기기처럼 공간 설정이 없는 경우 `unassigned`가 기본값입니다.
+- `device_room_set {"id":"<등록된 ID>","room":"living"}`는 인증된 사용자의 **쓰기 RPC**입니다. `living`, `bedroom`, `study`, `kitchen`, `other`, `unassigned`만 허용합니다.
+- 변경은 `/etc/config/jarbis`의 개별 device 섹션에 기록되고, 브라우저 비밀 저장소나 MQTT 설정을 건드리지 않습니다.
+- 센서·전구 수가 많아도 프론트엔드는 순환·분산 상태 조회를 수행하므로 기기 6대 초과가 누락되지 않습니다.

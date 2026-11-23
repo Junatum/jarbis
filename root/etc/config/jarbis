@@ -21,3 +21,4 @@ config discovery 'discovery'
 #     option kind 'light'
 #     option protocol 'tasmota'
 #     option topic 'livingroom'
+#     option room 'living'  # unassigned, living, bedroom, study, kitchen, other

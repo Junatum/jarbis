@@ -76,6 +76,14 @@ if sh "$CLI" device-add bulb2 'Another Bulb' 'aiyato_cb0735' >/dev/null 2>&1; th
 sh "$CLI" device-update bulb 'Kitchen Bulb' 0 || fail '기기 비활성화 실패'
 [ "$(cat "$STATE/jarbis.bulb.enabled")" = 0 ] || fail '기기 비활성화 누락'
 if sh "$CLI" device-update bulb 'Broken' bogus >/dev/null 2>&1; then fail '잘못된 enabled 허용'; fi
+sh "$CLI" device-room-set bulb living || fail '공간 설정 실패'
+[ "$(cat "$STATE/jarbis.bulb.room")" = living ] || fail '공간 설정 저장 누락'
+sh "$CLI" device-room-set bulb study || fail '공간 변경 실패'
+[ "$(cat "$STATE/jarbis.bulb.room")" = study ] || fail '공간 설정 갱신 누락'
+for room in '../etc/passwd' 'living room' 'living;reboot' ''; do
+  if sh "$CLI" device-room-set bulb "$room" >/dev/null 2>&1; then fail '위험 공간 허용'; fi
+done
+if sh "$CLI" device-room-set missing living >/dev/null 2>&1; then fail '미등록 기기 공간 변경 허용'; fi
 sh "$CLI" device-remove bulb || fail '기기 삭제 실패'
 [ ! -e "$STATE/jarbis.bulb" ] || fail '기기 삭제 후 UCI 섹션 잔존'
 [ ! -d "$TMP/lock" ] || fail '관리 락 미해제'

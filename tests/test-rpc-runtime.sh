@@ -33,7 +33,7 @@ export function cursor() {
         },
         foreach: function(config, kind, callback) {
             if (config == 'jarbis' && kind == 'device') {
-                callback({ '.name': 'living_room', name: '거실 전구', kind: 'light', protocol: 'tasmota', enabled: '1', password: 'must-not-leak' });
+                callback({ '.name': 'living_room', name: '거실 전구', room: 'living', kind: 'light', protocol: 'tasmota', enabled: '1', password: 'must-not-leak' });
                 callback({ '.name': 'disabled', name: '꺼진 기기', kind: 'light', protocol: 'tasmota', enabled: '0' });
                 callback({ '.name': 'study_sensor', name: '서재 온습도', kind: 'sensor', protocol: 'shelly_htg3', topic: 'shellyhtg3-aabbccddeeff', enabled: '1' });
             }
@@ -52,7 +52,7 @@ export function unlink(path) { return true; };
 export function rmdir(path) { return true; };
 STUB
 cat > "$RUNNER" <<'UCRUN'
-import { status, devices_list, light_set, light_state, sensor_state, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials, device_pair } from './jarbis/core.uc';
+import { status, devices_list, device_room_set, light_set, light_state, sensor_state, discovery_list, discovery_scan, settings_update, device_add, device_update, device_remove, broker_credentials, device_pair } from './jarbis/core.uc';
 import { set_unavailable } from 'uci';
 let published = null;
 const mock_publish = function(argv, timeout) {
@@ -73,6 +73,9 @@ const result = {
       function(argv) { return argv[1] == 'device-add' && argv[5] == 'shelly_htg3' ? 0 : 1; }),
     shellyBadAdd: device_add({ args: { id: 'study_sensor', name: 'Study Sensor', topic: 'tasmota_CB0735', protocol: 'shelly_htg3', kind: 'sensor' } }, function() { return 0; }),
     update: device_update({ args: { id: 'living_room', name: 'Lamp', enabled: true } }, function(argv) { return argv[1] == 'device-update' ? 0 : 1; }),
+    roomSet: device_room_set({ args: { id: 'study_sensor', room: 'study' } }, function(argv) { return argv[1] == 'device-room-set' && argv[3] == 'study' ? 0 : 1; }),
+    invalidRoom: device_room_set({ args: { id: 'study_sensor', room: 'study;reboot' } }, function() { return 0; }),
+    missingRoomDevice: device_room_set({ args: { id: 'unknown_device', room: 'living' } }, function() { return 0; }),
     remove: device_remove({ args: { id: 'living_room' } }, function(argv) { return argv[1] == 'device-remove' ? 0 : 1; }),
     credsUnavailable: broker_credentials(function() { return null; }),
     pairInvalid: device_pair({ args: { id: '../../unsafe' } }),
@@ -203,6 +206,11 @@ devices_data = success_data('devices')
 devices = devices_data.get('devices')
 require(isinstance(devices, list) and len(devices) == 3, 'UCI 기기 목록 개수')
 require(devices[0].get('id') == 'living_room', 'UCI 기기 ID')
+require(devices[0].get('room') == 'living', 'UCI 공간 분류')
+require(devices[1].get('room') == 'unassigned', '구버전 기기의 기본 공간')
+require(success_data('roomSet').get('room') == 'study', '공간 변경 RPC')
+expect_error('invalidRoom', 'INVALID_ROOM')
+expect_error('missingRoomDevice', 'INVALID_DEVICE')
 require(devices[0].get('capabilities') == ['power', 'brightness', 'color', 'color_temperature'], '지원 capability')
 require('must-not-leak' not in json.dumps(r), 'UCI 비밀값 노출')
 require(any(d['id'] == 'study_sensor' and d['capabilities'] == ['temperature', 'humidity', 'battery'] for d in devices), '센서 capabilities')

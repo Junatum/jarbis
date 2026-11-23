@@ -56,7 +56,7 @@ read = set(acl['jarbis']['read']['ubus']['jarbis'])
 write = set(acl['jarbis']['write']['ubus']['jarbis'])
 require(actual == (read | write), 'RPC methods must match ACL grants exactly')
 require(not (read & write), 'read/write ACL must not overlap')
-require(read == {'status','devices_list','discovery_list','light_state','sensor_state'} and write == {'light_set','discovery_scan','settings_update','device_add','device_update','device_remove','broker_credentials','device_pair'}, 'unexpected RPC method privilege')
+require(read == {'status','devices_list','discovery_list','light_state','sensor_state'} and write == {'light_set','discovery_scan','settings_update','device_add','device_update','device_room_set','device_remove','broker_credentials','device_pair'}, 'unexpected RPC method privilege')
 require('unauthenticated' not in json.dumps(acl), 'ACL must not grant anonymous access')
 PYTEST
 printf 'PASS: 패키지 설치 대상·실행 권한·RPC ACL·의존성 및 기본 보안 계약\n'

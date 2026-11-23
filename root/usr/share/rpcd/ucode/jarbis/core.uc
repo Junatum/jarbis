@@ -27,17 +27,23 @@ export function status(checker) {
         }
         return success({
             apiVersion: 1,
-            version: '0.2.3-r4',
+            version: '0.2.3-r5',
             enabled: cfg.get('jarbis', 'main', 'enabled') == '1',
             mqttConfigured: !!cfg.get('jarbis', 'broker', 'host'),
             brokerMode: cfg.get('jarbis', 'broker', 'mode') ?? 'external',
             brokerHost: cfg.get('jarbis', 'broker', 'mode') == 'managed' ? (cfg.get('jarbis', 'broker', 'lan_ip') ?? cfg.get('network', 'lan', 'ipaddr') ?? '') : (cfg.get('jarbis', 'broker', 'host') ?? ''),
             brokerPort: cfg.get('jarbis', 'broker', 'port') ?? '1883',
             brokerReady: connected,
-            features: { lightControl: true, discovery: true, mqttDiscovery: true, shellyHtg3: true, shellyQuickPair: true, automation: false, ai: false },
+            features: { lightControl: true, discovery: true, mqttDiscovery: true, shellyHtg3: true, shellyQuickPair: true, rooms: true, automation: false, ai: false },
         });
     }
     catch (e) { return failure('CONFIG_UNAVAILABLE', 'Jarbis 설정을 읽지 못했습니다.'); }
+};
+
+// Fixed room identifiers only: safe to persist in UCI and render without HTML.
+function valid_room(room) {
+    return room == 'unassigned' || room == 'living' || room == 'bedroom' ||
+        room == 'study' || room == 'kitchen' || room == 'other';
 };
 
 export function devices_list() {
@@ -56,6 +62,7 @@ export function devices_list() {
                 protocol: dev.protocol ?? '',
                 topic: dev.topic ?? '',
                 enabled: dev.enabled == '1',
+                room: valid_room(dev.room) ? dev.room : 'unassigned',
                 capabilities: dev.kind == 'light' && dev.protocol == 'tasmota'
                     ? ['power', 'brightness', 'color', 'color_temperature'] :
                     dev.kind == 'sensor' && dev.protocol == 'shelly_htg3'
@@ -331,6 +338,23 @@ export function device_update(request, executor) {
     if (!managed_command(['device-update', args.id, args.name, args.enabled ? '1' : '0'], executor))
         return failure('DEVICE_UPDATE_FAILED', '기기 설정을 변경하지 못했습니다.');
     return success({ id: args.id, updated: true });
+};
+
+// An explicit write RPC; never accept arbitrary UCI sections or room names.
+export function device_room_set(request, executor) {
+    const id = request?.args?.id;
+    const room = request?.args?.room;
+    if (!device_id(id) || type(room) != 'string' || !valid_room(room))
+        return failure('INVALID_ROOM', '지원하지 않는 공간입니다.');
+    const cfg = config_cursor();
+    if (!cfg) return failure('CONFIG_UNAVAILABLE', '기기 설정을 읽지 못했습니다.');
+    try {
+        if (cfg.get('jarbis', id) != 'device')
+            return failure('INVALID_DEVICE', '등록된 기기가 아닙니다.');
+    } catch (e) { return failure('INVALID_DEVICE', '등록된 기기가 아닙니다.'); }
+    if (!managed_command(['device-room-set', id, room], executor))
+        return failure('ROOM_UPDATE_FAILED', '공간 설정을 저장하지 못했습니다.');
+    return success({ id: id, room: room, updated: true });
 };
 
 export function device_remove(request, executor) {

@@ -124,6 +124,17 @@ case "$1" in
         "$UCI_BIN" set "jarbis.$id.enabled=$4"
         "$UCI_BIN" commit jarbis
         ;;
+    device-room-set)
+        [ "$#" -eq 3 ] || fail 'invalid arguments'
+        id="$2"
+        valid_id "$id" || fail 'invalid ID'
+        case "$3" in unassigned|living|bedroom|study|kitchen|other) ;; *) fail 'invalid room' ;; esac
+        [ "$(get "jarbis.$id")" = device ] || fail 'unknown device'
+        [ "$(get "jarbis.$id.room")" = "$3" ] || {
+            "$UCI_BIN" set "jarbis.$id.room=$3"
+            "$UCI_BIN" commit jarbis
+        }
+        ;;
     device-remove)
         [ "$#" -eq 2 ] || fail 'invalid arguments'
         valid_id "$2" || fail 'invalid ID'
