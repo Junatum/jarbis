@@ -48,22 +48,19 @@ ubus call jarbis status '{}'
 - 신규 설치 비활성화, 기존 UCI/인증 정보 보존, 기존 Mosquitto 충돌 시 비파괴 동작, rpcd ACL 재적용 확인
 - WAN으로 1883 포트를 열지 않았는지, 관리자에게만 자격 증명 조회가 허용되는지 점검
 
-## Shelly H&T Gen3 (0.2.3-r2)
+## Shelly H&T Gen3 (0.2.3-r3)
 
-1. Shelly를 공유기 Wi-Fi에 연결하고 버튼을 눌러 설정 모드로 깨웁니다.
-2. Shelly의 로컬 웹 UI에서 MQTT를 활성화하고 Jarbis Broker 주소(공유기 LAN IP), 포트 `1883`,
-   `broker_credentials`에서 확인한 사용자 이름·비밀번호를 설정합니다. `RPC status notifications`를 켭니다.
-   기존 MQTT 연결을 자동으로 덮어쓰지 않습니다. 본 버전은 기본 MQTT topic prefix
-   `shellyhtg3-<12자리 MAC>`만 지원합니다. `status_ntf`는 선택사항입니다.
-3. 스마트홈에서 기기 검색을 실행합니다. Shelly DHCP 호스트명과 MAC 주소가 일치하면
-   센서가 잠든 상태에서도 등록 후보로 표시됩니다(`source=dhcp`). HTTP로 모델·MAC까지
-   확인된 경우에는 `source=http`가 표시됩니다. DHCP 기반 후보는 모델이 확증된 기기가
-   아니므로 사용자가 실제 기기인지 확인하고 승인해야만 등록됩니다. 자동 등록은 하지 않습니다.
-4. 등록 후 기기를 다시 깨워 MQTT 보고를 수신시키면 온도·습도·배터리 카드가 표시됩니다.
-   센서의 기본 `NotifyFullStatus`/`NotifyStatus` 및 선택형 MQTT component status를 인식합니다.
-5. `sensor_state`는 마지막 MQTT 수신값을 보여주며 배터리 기기를 강제로 깨우거나 폴링하지 않습니다.
-   재부팅용 `/etc/jarbis/sensor-cache/` 백업은 센서별 최대 6시간마다 갱신되므로
-   재부팅 직전 최신 보고는 유실될 수 있습니다. `lastSeen`은 실제 MQTT 수신 시각입니다.
+**간편 연결** (관리형 MQTT Broker 사용 시):
+1. Shelly를 SmartSafeHub Wi-Fi에 연결합니다. Shelly의 HTTP 관리 API는 기본 인증이 없는 상태여야 합니다.
+2. 스마트홈에서 기기를 검색한 뒤 `연결 및 추가`를 선택합니다. 기기가 잠들어 있으면 뒷면 버튼을 **짧게** 누르고 다시 시도합니다.
+3. 기기가 깨어 있으면 Jarbis가 로컬 HTTP API로 모델과 MAC을 확인한 후 공유기 내장 MQTT 인증 정보를 직접 전달합니다. 비밀번호는 브라우저에 전달하거나 URL/프로세스 인자로 사용하지 않습니다.
+4. 연결 전에 가능한 경우 HTTP에서 첫 온습도 측정값을 가져와 센서 카드에 표시합니다. 이후에는 기존 MQTT 수신기에서 최신 보고를 받습니다. 설정 변경 시 Shelly 공식 API의 필요 조건에 따라 자동 재시작합니다.
+
+**안전한 예외 처리**: 기존의 다른 MQTT Broker가 설정되어 있으면 묵시적으로 덮어쓰지 않고 다시 확인받습니다. 절전 중에는 임의로 연결/재부팅하지 않고 버튼을 짧게 누르도록 안내합니다. HTTP 관리자 인증이 설정된 Shelly는 자동 연결 대상에서 제외하고 수동 연결을 유지합니다. DHCP 검색 후보는 사용자 승인을 받아야 하며, HTTP 연결 시 기기 모델·ID·MAC을 다시 확인합니다. 관리형 Broker가 아닌 경우에도 수동 연결을 사용합니다.
+
+**수동 연결**은 고급 설정에 남아 있습니다. Shelly 관리 화면에서 MQTT 서버(공유기 LAN IP:1883), 사용자 이름/비밀번호, RPC status notifications를 입력하면 됩니다. 기본 MQTT topic prefix `shellyhtg3-<12자리 MAC>`을 사용합니다. HTTP가 닿지 않는 절전 기기도 DHCP 후보로 표시되지만, 자동 연결은 깨어 있는 상태에서만 가능합니다.
+
+`source=http`은 최초 측정값을 직접 수신한 경우, `source=mqtt`는 기기의 MQTT 보고를 의미합니다. 최신 값을 정기적으로 강제 조회하지 않으며 배터리 절전을 유지합니다. 재부팅용 플래시 백업은 센서별 최대 6시간마다 갱신합니다.
 
 보안: 로컬 승인된 센서 토픽만 캐시되고, 수신 페이로드 최대 4 KiB, 인증 정보는 RPC/로그에 노출되지 않습니다.
 MQTT Broker는 기존 LAN 바인딩·인증 정책을 유지하고 Shelly Cloud는 필수 요구사항이 아닙니다.

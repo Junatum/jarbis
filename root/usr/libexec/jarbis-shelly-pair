@@ -1,0 +1,144 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Explicitly approved Shelly H&T Gen3 pairing. Passwords are transferred in
+# an HTTP request body from a mode-0700 temp directory, never argv or URLs.
+set -eu
+umask 077
+UCI_BIN="${JARBIS_UCI_BIN:-uci}"
+HTTP_BIN="${JARBIS_CURL_BIN:-curl}"
+JSON_BIN="${JARBIS_JSONFILTER_BIN:-jsonfilter}"
+BROKER_BIN="${JARBIS_BROKER_BIN:-/usr/libexec/jarbis-broker}"
+CACHE_BIN="${JARBIS_SHELLY_CACHE_BIN:-/usr/libexec/jarbis-shelly-cache}"
+CREDENTIALS="${JARBIS_DEVICE_CREDENTIALS:-/etc/jarbis/device-credentials}"
+DISCOVERY="${JARBIS_DISCOVERY_CACHE:-/tmp/jarbis-discovery.records}"
+get() { "$UCI_BIN" -q get "$1" 2>/dev/null || :; }
+fail() { printf '%s\n' "$1" > "$RESULT"; exit 1; }
+valid_ip() {
+    case "$1" in ''|*[!0-9.]*|.*|*.|0.*|127.*|169.254.*|224.*|255.*) return 1 ;; esac
+    oldifs="$IFS"; IFS=.; set -- $1; IFS="$oldifs"
+    [ "$#" -eq 4 ] || return 1
+    for octet do
+        [ -n "$octet" ] && [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null || return 1
+    done
+}
+json() { "$JSON_BIN" -i "$DIR/response" -e "$1" 2>/dev/null || :; }
+# Only a local rpcd-generated work directory is accepted.
+[ "$#" -eq 1 ] || exit 1
+case "$1" in /tmp/jarbis-pair-??????) ;; *) exit 1 ;; esac
+DIR="$1"; RESULT="$DIR/result"
+[ -d "$DIR" ] && [ ! -L "$DIR" ] && [ -f "$DIR/request" ] && [ ! -L "$DIR/request" ] && [ ! -e "$RESULT" ] || exit 1
+{
+    IFS= read -r DEVICE || exit 1
+    IFS= read -r WEB_PASSWORD || exit 1
+    IFS= read -r REPLACE || exit 1
+} < "$DIR/request"
+[ -z "$WEB_PASSWORD" ] || fail WEB_AUTH_REQUIRED
+case "$REPLACE" in 0|1) ;; *) fail INVALID_REQUEST ;; esac
+case "$DEVICE" in ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]*) fail INVALID_DEVICE ;; esac
+[ "${#DEVICE}" -le 48 ] || fail INVALID_DEVICE
+[ "$(get jarbis.main.enabled)" = 1 ] || fail DISABLED
+[ "$(get jarbis.broker.mode)" = managed ] && [ "$(get jarbis.broker.managed_ready)" = 1 ] || fail BROKER_UNAVAILABLE
+"$BROKER_BIN" check >/dev/null 2>&1 || fail BROKER_UNAVAILABLE
+[ "$(get "jarbis.$DEVICE")" = device ] && [ "$(get "jarbis.$DEVICE.enabled")" = 1 ] &&
+    [ "$(get "jarbis.$DEVICE.protocol")" = shelly_htg3 ] &&
+    [ "$(get "jarbis.$DEVICE.kind")" = sensor ] || fail INVALID_DEVICE
+TOPIC="$(get "jarbis.$DEVICE.topic")"
+case "$TOPIC" in shellyhtg3-*) SUFFIX="${TOPIC#shellyhtg3-}" ;; *) fail INVALID_DEVICE ;; esac
+[ "${#SUFFIX}" -eq 12 ] && [ "$(printf '%s' "$SUFFIX" | tr -cd 'a-fA-F0-9')" = "$SUFFIX" ] || fail INVALID_DEVICE
+LAN="$(get jarbis.broker.lan_ip)"; LAN="${LAN%/24}"
+valid_ip "$LAN" || fail BROKER_UNAVAILABLE
+[ "$(get jarbis.broker.port)" = 1883 ] || fail BROKER_UNAVAILABLE
+[ -f "$DISCOVERY" ] && [ ! -L "$DISCOVERY" ] || fail DEVICE_NOT_FOUND
+IP=''; MAC=''
+while IFS='|' read -r source ip mac topic name; do
+    case "$source" in shelly-http|shelly-dhcp) ;; *) continue ;; esac
+    if [ "$topic" = "$TOPIC" ]; then IP="$ip"; MAC="$mac"; break; fi
+done < "$DISCOVERY"
+valid_ip "$IP" || fail DEVICE_NOT_FOUND
+# Match the discovery /24 policy and refuse router/loopback/multicast.
+case "$IP" in "${LAN%.*}."*) ;; *) fail UNSAFE_TARGET ;; esac
+[ "$IP" != "$LAN" ] && [ "${IP##*.}" -ge 1 ] 2>/dev/null &&
+    [ "${IP##*.}" -le 254 ] 2>/dev/null || fail UNSAFE_TARGET
+MAC_HEX="$(printf '%s' "$MAC" | tr -d ':' | tr A-F a-f)"
+[ "${#MAC_HEX}" -eq 12 ] && [ "$MAC_HEX" = "$(printf '%s' "$SUFFIX" | tr A-F a-f)" ] || fail DEVICE_MISMATCH
+[ -f "$CREDENTIALS" ] && [ ! -L "$CREDENTIALS" ] || fail BROKER_UNAVAILABLE
+{
+    IFS= read -r userline || :
+    IFS= read -r passline || :
+} < "$CREDENTIALS"
+[ "$userline" = username=jarbis ] || fail BROKER_UNAVAILABLE
+case "$passline" in password=*) SECRET="${passline#password=}" ;; *) fail BROKER_UNAVAILABLE ;; esac
+[ "${#SECRET}" -eq 64 ] && [ "$(printf '%s' "$SECRET" | tr -cd 'a-f0-9')" = "$SECRET" ] || fail BROKER_UNAVAILABLE
+command -v "$HTTP_BIN" >/dev/null 2>&1 && command -v "$JSON_BIN" >/dev/null 2>&1 || fail HTTP_UNAVAILABLE
+rpc() {
+    method="$1"
+    # The POST body is prepared in the private directory, never logged.
+    if [ "$#" -eq 1 ]; then
+        printf '{"id":1,"method":"%s"}' "$method" > "$DIR/form"
+    fi
+    "$HTTP_BIN" --disable --fail --silent --show-error --noproxy '*' --proto '=http' \
+        --max-redirs 0 --connect-timeout 2 --max-time 4 --max-filesize 8192 \
+        --header 'Content-Type: application/json' --data-binary "@$DIR/form" \
+        --output "$DIR/response" "http://$IP/rpc" 2>/dev/null || return 1
+    [ -s "$DIR/response" ] && [ "$(wc -c < "$DIR/response")" -le 8192 ]
+}
+# An asleep battery sensor cannot be woken over HTTP. Ask for a short button
+# press, rather than guessing credentials or reconfiguring a DHCP-only record.
+rpc Shelly.GetDeviceInfo || fail WAKE_REQUIRED
+ID="$(json '@.id')"; INFO_MAC="$(json '@.mac')"; MODEL="$(json '@.model')"
+GEN="$(json '@.gen')"; APP="$(json '@.app')"; AUTH="$(json '@.auth_en')"
+[ "$ID" = "$TOPIC" ] && [ "$(printf '%s' "$INFO_MAC" | tr A-F a-f)" = "$MAC_HEX" ] &&
+    [ "$MODEL" = S3SN-0U12A ] && [ "$GEN" = 3 ] && [ "$APP" = HTG3 ] || fail DEVICE_MISMATCH
+[ "$AUTH" != true ] || fail WEB_AUTH_REQUIRED
+rpc MQTT.GetConfig || fail HTTP_UNAVAILABLE
+OLD_SERVER="$(json '@.server')"; OLD_USER="$(json '@.user')"
+OLD_TOPIC="$(json '@.topic_prefix')"; OLD_ENABLE="$(json '@.enable')"
+OLD_NOTIFY="$(json '@.rpc_ntf')"; OLD_CA="$(json '@.ssl_ca')"
+case "$OLD_ENABLE" in true|false) ;; *) fail HTTP_CONFIG_FAILED ;; esac
+TARGET="$LAN:1883"
+# Avoid unnecessarily resetting credentials/rebooting an already configured sensor.
+# Do not steal a device already managed by another broker without consent.
+if [ -n "$OLD_SERVER" ] && [ "$OLD_SERVER" != null ] && [ "$OLD_SERVER" != "$TARGET" ] &&
+   [ "$REPLACE" != 1 ]; then
+    fail BROKER_CONFLICT
+fi
+# Never change or trust configuration for an unrelated MQTT server without
+# explicit approval. Fetch the first reading only after checking this.
+# Seed the first reading without needing to wait for an MQTT wake/report.
+# Feed the unmodified status through the same registered-device validator as MQTT.
+OBSERVED=0
+if rpc Shelly.GetStatus && [ "$(wc -c < "$DIR/response")" -le 3600 ]; then
+    STATUS_MAC="$(json '@.sys.mac')"
+    if [ "$(printf '%s' "$STATUS_MAC" | tr A-F a-f)" = "$MAC_HEX" ]; then
+        if { printf '{"src":"%s","method":"NotifyFullStatus","params":' "$TOPIC";
+            cat "$DIR/response"; printf '}'; } | \
+            JARBIS_SHELLY_SOURCE=http "$CACHE_BIN" ingest "$TOPIC/events/rpc" >/dev/null 2>&1; then
+            OBSERVED=1
+        fi
+    fi
+fi
+# Avoid unnecessary credential changes and sensor reboots.
+if [ "$OLD_SERVER" = "$TARGET" ] && [ "$OLD_USER" = jarbis ] &&
+   { [ "$OLD_TOPIC" = "$TOPIC" ] || [ -z "$OLD_TOPIC" ]; } &&
+   [ "$OLD_ENABLE" = true ] && [ "$OLD_NOTIFY" = true ] &&
+   { [ -z "$OLD_CA" ] || [ "$OLD_CA" = null ]; }; then
+    # A config match is not proof that the broker password is still valid.
+    if rpc MQTT.GetStatus && [ "$(json '@.connected')" = true ]; then
+        printf '%s\n' "$([ "$OBSERVED" = 1 ] && printf OBSERVED || printf CONFIGURED)" > "$RESULT"
+        exit 0
+    fi
+fi
+# Build the JSON with a strict alphanumeric secret, LAN IPv4 and topic.
+printf '{"id":1,"method":"MQTT.SetConfig","params":{"config":{"enable":true,"server":"%s",' "$TARGET" > "$DIR/form"
+printf '"user":"jarbis","pass":"%s","topic_prefix":"%s","rpc_ntf":true,' "$SECRET" "$TOPIC" >> "$DIR/form"
+printf '"status_ntf":false,"enable_rpc":true,"enable_control":true,"ssl_ca":null}}}' >> "$DIR/form"
+rpc MQTT.SetConfig keep || fail HTTP_CONFIG_FAILED
+[ -z "$(json '@.error.code')" ] && [ -z "$(json '@.code')" ] || fail HTTP_CONFIG_FAILED
+case "$(json '@.restart_required')" in true|false) ;; *) fail HTTP_CONFIG_FAILED ;; esac
+# The Shelly API requires reboot for MQTT.SetConfig. A failed reboot request
+# leaves CONFIGURED_PENDING (never falsely claim the live MQTT is connected).
+if ! rpc Shelly.Reboot; then
+    printf '%s\n' CONFIGURED_PENDING > "$RESULT"
+    exit 0
+fi
+printf '%s\n' "$([ "$OBSERVED" = 1 ] && printf OBSERVED || printf CONFIGURED)" > "$RESULT"

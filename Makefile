@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=jarbis
 PKG_VERSION:=0.2.3
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=SmartSafeHub Contributors
@@ -59,6 +59,7 @@ define Package/jarbis/install
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-pair $(1)/usr/libexec/jarbis-pair
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-shelly-listen $(1)/usr/libexec/jarbis-shelly-listen
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-shelly-cache $(1)/usr/libexec/jarbis-shelly-cache
+	$(INSTALL_BIN) ./root/usr/libexec/jarbis-shelly-pair $(1)/usr/libexec/jarbis-shelly-pair
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./root/etc/init.d/jarbis $(1)/etc/init.d/jarbis
 	$(INSTALL_BIN) ./root/usr/libexec/jarbis-rpcd-reconcile $(1)/usr/libexec/jarbis-rpcd-reconcile

@@ -92,9 +92,9 @@ lock="$TMP_DIR/.$id.lock"
 mkdir "$lock" 2>/dev/null || exit 1
 trap 'rm -f "$PAYLOAD_FILE"; rmdir "$lock"' EXIT HUP INT TERM
 if [ -f "$file" ] && [ ! -L "$file" ]; then
-    IFS='|' read -r old_t old_h old_b old_time < "$file" || :
+    IFS='|' read -r old_t old_h old_b old_time old_source < "$file" || :
 elif [ -f "$backup" ] && [ ! -L "$backup" ]; then
-    IFS='|' read -r old_t old_h old_b old_time < "$backup" || :
+    IFS='|' read -r old_t old_h old_b old_time old_source < "$backup" || :
 fi
 # Do not use untrusted data as paths; even a damaged cache cannot inject a value.
 valid_decimal "$old_t" -40 125 || old_t=''
@@ -105,7 +105,8 @@ case "$old_time" in ''|*[!0-9]*) old_time=0 ;; esac
 [ -n "$humidity" ] || humidity="$old_h"
 [ -n "$battery" ] || battery="$old_b"
 new_file="$(mktemp "$TMP_DIR/.sensor.XXXXXX")" || exit 1
-printf '%s|%s|%s|%s\n' "$temperature" "$humidity" "$battery" "$now" > "$new_file"
+case "${JARBIS_SHELLY_SOURCE:-mqtt}" in http) source=http ;; *) source=mqtt ;; esac
+printf '%s|%s|%s|%s|%s\n' "$temperature" "$humidity" "$battery" "$now" "$source" > "$new_file"
 chmod 600 "$new_file"
 mv -f "$new_file" "$file"
 # Flash writes are deliberately limited: first valid report and one snapshot
@@ -122,7 +123,7 @@ if [ "$write_backup" = 1 ]; then
     [ ! -L "$BACKUP_DIR" ] && [ ! -L "$backup" ] || exit 0
     [ "$(LC_ALL=C ls -ld "$BACKUP_DIR" | cut -c 1-10)" = 'drwx------' ] || exit 0
     saved="$(mktemp "$BACKUP_DIR/.sensor.XXXXXX")" || exit 0
-    printf '%s|%s|%s|%s\n' "$temperature" "$humidity" "$battery" "$now" > "$saved"
+    printf '%s|%s|%s|%s|%s\n' "$temperature" "$humidity" "$battery" "$now" "$source" > "$saved"
     chmod 600 "$saved"
     mv -f "$saved" "$backup"
 fi

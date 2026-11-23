@@ -63,6 +63,13 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The error should be blank
   End
 
+  It 'Shelly 센서 간편 연결과 최초 측정값 및 기존 MQTT 보호를 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-shelly-pair.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
   It '패키지 설치 경로와 ACL 및 권한 계약을 검증한다'
     When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-package-contract.sh"
     The status should be success

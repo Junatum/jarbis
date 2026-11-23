@@ -6,7 +6,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 [ ! -e "$ROOT/tests/run.sh" ] || fail 'tests/run.sh must remain removed'
 [ -x "$ROOT/root/usr/libexec/jarbis-manage" ] || fail 'manage executable missing'
 [ -x "$ROOT/root/usr/libexec/jarbis-broker" ] || fail 'broker executable missing'
-[ -x "$ROOT/root/usr/libexec/jarbis-pair" ] || fail 'pair executable missing'
+[ -x "$ROOT/root/usr/libexec/jarbis-pair" ] && [ -x "$ROOT/root/usr/libexec/jarbis-shelly-pair" ] || fail 'pair executable missing'
 [ -x "$ROOT/root/usr/libexec/jarbis-discover" ] || fail 'discover executable missing'
 [ -x "$ROOT/root/etc/init.d/jarbis" ] || fail 'init executable missing'
 [ -x "$ROOT/root/usr/libexec/jarbis-state" ] || fail 'jarbis-state executable missing'
@@ -17,7 +17,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 [ -f "$ROOT/root/usr/share/rpcd/acl.d/jarbis.json" ] || fail 'ACL missing'
 [ -f "$ROOT/root/lib/upgrade/keep.d/jarbis" ] || fail 'keep.d missing'
 [ -f "$ROOT/root/etc/config/jarbis" ] || fail 'default UCI config missing'
-sh -n "$ROOT/root/usr/libexec/jarbis-shelly-listen" "$ROOT/root/usr/libexec/jarbis-shelly-cache" "$ROOT/root/usr/libexec/jarbis-state" "$ROOT/root/usr/libexec/jarbis-control" "$ROOT/root/usr/libexec/jarbis-broker" "$ROOT/root/usr/libexec/jarbis-manage" "$ROOT/root/usr/libexec/jarbis-discover" "$ROOT/root/usr/libexec/jarbis-pair" "$ROOT/root/etc/init.d/jarbis" "$ROOT/root/usr/libexec/jarbis-rpcd-reconcile" || fail 'invalid router shell syntax'
+sh -n "$ROOT/root/usr/libexec/jarbis-shelly-listen" "$ROOT/root/usr/libexec/jarbis-shelly-cache" "$ROOT/root/usr/libexec/jarbis-state" "$ROOT/root/usr/libexec/jarbis-control" "$ROOT/root/usr/libexec/jarbis-broker" "$ROOT/root/usr/libexec/jarbis-manage" "$ROOT/root/usr/libexec/jarbis-discover" "$ROOT/root/usr/libexec/jarbis-pair" "$ROOT/root/usr/libexec/jarbis-shelly-pair" "$ROOT/root/etc/init.d/jarbis" "$ROOT/root/usr/libexec/jarbis-rpcd-reconcile" || fail 'invalid router shell syntax'
 python3 - "$ROOT" <<'PYTEST'
 from pathlib import Path
 import json, re, sys
@@ -33,6 +33,7 @@ paths = {
   'root/usr/libexec/jarbis-pair': 'INSTALL_BIN',
   'root/usr/libexec/jarbis-shelly-listen': 'INSTALL_BIN',
   'root/usr/libexec/jarbis-shelly-cache': 'INSTALL_BIN',
+  'root/usr/libexec/jarbis-shelly-pair': 'INSTALL_BIN',
   'root/etc/init.d/jarbis': 'INSTALL_BIN',
   'root/usr/libexec/jarbis-rpcd-reconcile': 'INSTALL_BIN',
   'root/usr/share/rpcd/ucode/jarbis.uc': 'INSTALL_DATA',
