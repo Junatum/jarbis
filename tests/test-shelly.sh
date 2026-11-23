@@ -64,8 +64,9 @@ CACHE="$ROOT/root/usr/libexec/jarbis-shelly-cache"
 if sh "$MANAGE" device-add fake 'Fake' 'shellyhtg3-001122334455' shelly_htg3 >/dev/null 2>&1; then fail 'unapproved sensor registered'; fi
 if sh "$MANAGE" device-add bad 'Bad' 'tasmota_CB0735' shelly_htg3 >/dev/null 2>&1; then fail 'Tasmota record registered as Shelly'; fi
 if sh "$MANAGE" device-add bad 'Bad' 'shellyhtg3-aabbccddeeff' other >/dev/null 2>&1; then fail 'invalid protocol accepted'; fi
-sh "$MANAGE" device-add living 'Living Sensor' 'shellyhtg3-aabbccddeeff' shelly_htg3 || fail 'Shelly register failed'
+sh "$MANAGE" device-add living 'Shelly H&T Gen3' 'shellyhtg3-aabbccddeeff' shelly_htg3 || fail 'Shelly register failed'
 [ "$(cat "$STATE/jarbis.living.kind")" = sensor ] || fail 'sensor kind not stored'
+[ "$(cat "$STATE/jarbis.living.name")" = 'Shelly H&T Gen3' ] || fail 'Shelly name with ampersand not stored'
 [ "$(cat "$STATE/jarbis.living.protocol")" = shelly_htg3 ] || fail 'sensor protocol not stored'
 grep -Fx start "$INIT_LOG" >/dev/null || fail 'reader not started on registration'
 if sh "$MANAGE" device-add same 'Duplicate' 'shellyhtg3-aabbccddeeff' shelly_htg3 >/dev/null 2>&1; then fail 'duplicate accepted'; fi

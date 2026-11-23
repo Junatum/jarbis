@@ -229,7 +229,7 @@ export function discovery_list(reader) {
             if (topic && match(topic, /^[A-Za-z0-9_-]{1,96}$/) == null) continue;
             if (ip && match(ip, /^[0-9.]{7,15}$/) == null) continue;
             if (mac && match(mac, /^[a-fA-F0-9:]{12,17}$/) == null) continue;
-            if (match(name, /^[A-Za-z0-9 _-]{1,48}$/) == null) continue;
+            if (match(name, /^[A-Za-z0-9 _&-]{1,48}$/) == null) continue;
             const shelly = source == 'shelly-http';
             if (shelly && match(topic, /^shellyhtg3-[A-Fa-f0-9]{12}$/) == null) continue;
             let key = (shelly ? 'shelly:' : 'tasmota:') + (ip || mac || topic);
@@ -273,7 +273,7 @@ function managed_command(args, executor) {
     catch (e) { return false; }
 };
 function device_name(name) {
-    return type(name) == 'string' && match(name, /^[A-Za-z0-9 _-]{1,48}$/) != null;
+    return type(name) == 'string' && match(name, /^[A-Za-z0-9 _&-]{1,48}$/) != null;
 };
 function device_topic(topic) {
     return type(topic) == 'string' && match(topic, /^[A-Za-z0-9_-]{1,96}$/) != null;

@@ -69,7 +69,7 @@ const result = {
     brokerUserError: settings_update({ args: { enabled: true } }, function() { return 1; }, function() { return 'MOSQUITTO_USER_MISSING\n'; }),
     add: device_add({ args: { id: 'tasmota_aiyato', name: 'AiYaTo Bulb', topic: 'aiyato_cb0735' } }, function(argv) { return argv[1] == 'device-add' ? 0 : 1; }),
     invalidAdd: device_add({ args: { id: '../../broken', name: 'bad', topic: 'home' } }, function() { return 0; }),
-    shellyAdd: device_add({ args: { id: 'study_sensor', name: 'Study Sensor', topic: 'shellyhtg3-aabbccddeeff', protocol: 'shelly_htg3', kind: 'sensor' } },
+    shellyAdd: device_add({ args: { id: 'study_sensor', name: 'Shelly H&T Gen3', topic: 'shellyhtg3-aabbccddeeff', protocol: 'shelly_htg3', kind: 'sensor' } },
       function(argv) { return argv[1] == 'device-add' && argv[5] == 'shelly_htg3' ? 0 : 1; }),
     shellyBadAdd: device_add({ args: { id: 'study_sensor', name: 'Study Sensor', topic: 'tasmota_CB0735', protocol: 'shelly_htg3', kind: 'sensor' } }, function() { return 0; }),
     update: device_update({ args: { id: 'living_room', name: 'Lamp', enabled: true } }, function(argv) { return argv[1] == 'device-update' ? 0 : 1; }),
@@ -217,6 +217,7 @@ expect_error('shellyBadAdd', 'INVALID_DEVICE')
 require(len(success_data('discoveredMissing')['devices']) == 0, '캐시 파일이 없는 경우 빈 목록 반환')
 require(success_data('discoveredShelly')['devices'][0]['protocol'] == 'shelly_htg3', 'Shelly discovery protocol')
 require(success_data('discoveredShelly')['devices'][0]['kind'] == 'sensor', 'Shelly discovery kind')
+require(success_data('discoveredShelly')['devices'][0]['name'] == 'Shelly H&T Gen3', 'Shelly H&T name must survive RPC validation')
 require(success_data('discoveredShelly')['devices'][0]['registered'] is True, 'Shelly already registered')
 require(len(success_data('discovered')['devices']) == 1, '중복 및 위험 기기 검색 결과 필터링')
 require(len(success_data('scan')['devices']) == 1, '검색 RPC 실행 및 결과 수신')
