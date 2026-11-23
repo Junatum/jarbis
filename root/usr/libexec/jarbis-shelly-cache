@@ -91,6 +91,14 @@ old_t=''; old_h=''; old_b=''; old_time=''
 lock="$TMP_DIR/.$id.lock"
 mkdir "$lock" 2>/dev/null || exit 1
 trap 'rm -f "$PAYLOAD_FILE"; rmdir "$lock"' EXIT HUP INT TERM
+# Registration can be deleted/disabled after the initial topic lookup but
+# before this lock is acquired. Check again inside the critical section to
+# prevent an in-flight report recreating a deleted sensor's cache.
+[ "$(get "jarbis.$id")" = device ] &&
+    [ "$(get "jarbis.$id.enabled")" = 1 ] &&
+    [ "$(get "jarbis.$id.kind")" = sensor ] &&
+    [ "$(get "jarbis.$id.protocol")" = shelly_htg3 ] &&
+    [ "$(printf '%s' "$(get "jarbis.$id.topic")" | tr A-F a-f)" = "$prefix" ] || exit 1
 if [ -f "$file" ] && [ ! -L "$file" ]; then
     IFS='|' read -r old_t old_h old_b old_time old_source < "$file" || :
 elif [ -f "$backup" ] && [ ! -L "$backup" ]; then

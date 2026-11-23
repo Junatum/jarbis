@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=jarbis
 PKG_VERSION:=0.2.3
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=SmartSafeHub Contributors
@@ -79,7 +79,9 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -x /etc/init.d/rpcd ]; then
 		/bin/sh /usr/libexec/jarbis-rpcd-reconcile || exit 1
 	fi
-	[ "`uci -q get jarbis.main.enabled 2>/dev/null`" != 1 ] || /etc/init.d/jarbis start || exit 1
+	# A package upgrade must replace the running Shelly listener with the
+	# upgraded binary without rebooting or dropping existing MQTT secrets.
+	[ "`uci -q get jarbis.main.enabled 2>/dev/null`" != 1 ] || /etc/init.d/jarbis reload || exit 1
 fi
 exit 0
 endef

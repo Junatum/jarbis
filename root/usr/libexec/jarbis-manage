@@ -8,6 +8,48 @@ BROKER_BIN="${JARBIS_BROKER_BIN:-/usr/libexec/jarbis-broker}"
 CACHE="${JARBIS_DISCOVERY_CACHE:-/tmp/jarbis-discovery.records}"
 INIT="${JARBIS_INIT_BIN:-/etc/init.d/jarbis}"
 ERROR_FILE="${JARBIS_MANAGE_ERROR_FILE:-/tmp/jarbis-manage.error}"
+SENSOR_TMP="${JARBIS_SENSOR_TMP_DIR:-/tmp/jarbis-sensors}"
+SENSOR_BACKUP="${JARBIS_SENSOR_BACKUP_DIR:-/etc/jarbis/sensor-cache}"
+[ "${JARBIS_TEST_MODE:-}" = 1 ] || {
+    [ "$SENSOR_TMP" = /tmp/jarbis-sensors ] &&
+        [ "$SENSOR_BACKUP" = /etc/jarbis/sensor-cache ] || exit 1
+}
+
+# Reconcile procd instances without stopping the managed MQTT broker. On
+# reload OpenWrt replaces the declared 'shelly' instance if the set changes.
+reconcile_sensor() {
+    [ -x "$INIT" ] || return 1
+    "$INIT" reload >/dev/null 2>&1
+}
+
+# Use the same per-device mutex as jarbis-shelly-cache. A report already in
+# flight must finish before the device is removed from UCI and its cache freed.
+sensor_lock=''
+lock_sensor_cache() {
+    id="$1"
+    case "$id" in ''|[!a-zA-Z_]*|*[!a-zA-Z0-9_]*) return 1 ;; esac
+    [ "${#id}" -le 48 ] || return 1
+    [ ! -L "$SENSOR_TMP" ] && [ ! -L "$SENSOR_BACKUP" ] || return 1
+    if [ ! -d "$SENSOR_TMP" ]; then
+        mkdir -p "$SENSOR_TMP" || return 1
+    fi
+    [ "$(LC_ALL=C ls -ld "$SENSOR_TMP" | cut -c 1-10)" = 'drwx------' ] || return 1
+    if [ -e "$SENSOR_BACKUP" ]; then
+        [ -d "$SENSOR_BACKUP" ] &&
+            [ "$(LC_ALL=C ls -ld "$SENSOR_BACKUP" | cut -c 1-10)" = 'drwx------' ] || return 1
+    fi
+    sensor_lock="$SENSOR_TMP/.$id.lock"
+    attempts=0
+    until mkdir "$sensor_lock" 2>/dev/null; do
+        attempts=$((attempts + 1))
+        [ "$attempts" -lt 20 ] || { sensor_lock=''; return 1; }
+        sleep 0.1
+    done
+}
+release_sensor_cache() {
+    [ -z "$sensor_lock" ] || rmdir "$sensor_lock" 2>/dev/null || :
+    sensor_lock=''
+}
 # Only known, non-secret failure codes are persisted. Never store broker stderr.
 record_error() {
     tmp="$(mktemp "${ERROR_FILE}.XXXXXX")" || return 0
@@ -37,7 +79,7 @@ valid_name() {
 [ "$#" -gt 0 ] || fail 'missing action'
 LOCK="${JARBIS_MANAGE_LOCK:-/tmp/jarbis-manage.lock}"
 mkdir "$LOCK" 2>/dev/null || fail 'another operation is running'
-trap 'rmdir "$LOCK"' EXIT HUP INT TERM
+trap 'release_sensor_cache; rmdir "$LOCK"' EXIT HUP INT TERM
 case "$1" in
     enabled)
         [ "$#" -eq 2 ] || fail 'invalid arguments'
@@ -64,10 +106,11 @@ case "$1" in
             "$UCI_BIN" set "jarbis.main.enabled=$2"
             "$UCI_BIN" commit jarbis
         }
-        # procd starts/stops the Shelly MQTT reader on activation changes.
+        # Starting an already running service refreshes its procd instances.
+        # Disabling is a full stop, but only the owned managed broker may stop.
         if [ -x "$INIT" ]; then
-            if [ "$2" = 1 ]; then "$INIT" start >/dev/null 2>&1 || :
-            else "$INIT" stop >/dev/null 2>&1 || :; fi
+            if [ "$2" = 1 ]; then reconcile_sensor || fail 'service reload failed'
+            else "$INIT" stop >/dev/null 2>&1 || fail 'service stop failed'; fi
         fi
         ;;
     device-add)
@@ -108,10 +151,13 @@ case "$1" in
         "$UCI_BIN" set "jarbis.$id.protocol=$protocol"
         "$UCI_BIN" set "jarbis.$id.topic=$topic"
         "$UCI_BIN" commit jarbis
-        # Re-enter the service only for Shelly registration. Broker check
-        # avoids restarting working Tasmota connections.
-        if [ "$protocol" = shelly_htg3 ] && [ -x "$INIT" ]; then
-            "$INIT" start >/dev/null 2>&1 || :
+        # Rebuild the procd instance set without a full broker restart.
+        if [ "$protocol" = shelly_htg3 ]; then
+            if ! reconcile_sensor; then
+                "$UCI_BIN" delete "jarbis.$id"
+                "$UCI_BIN" commit jarbis
+                fail 'sensor listener reload failed; registration rolled back'
+            fi
         fi
         ;;
     device-update)
@@ -120,9 +166,20 @@ case "$1" in
         valid_id "$id" && valid_name "$name" || fail 'invalid device'
         case "$4" in 0|1) ;; *) fail 'invalid enabled flag' ;; esac
         [ "$(get "jarbis.$id")" = device ] || fail 'unknown device'
+        protocol="$(get "jarbis.$id.protocol")"
+        old_enabled="$(get "jarbis.$id.enabled")"
+        old_name="$(get "jarbis.$id.name")"
         "$UCI_BIN" set "jarbis.$id.name=$name"
         "$UCI_BIN" set "jarbis.$id.enabled=$4"
         "$UCI_BIN" commit jarbis
+        if [ "$protocol" = shelly_htg3 ] && [ "$old_enabled" != "$4" ]; then
+            if ! reconcile_sensor; then
+                "$UCI_BIN" set "jarbis.$id.name=$old_name"
+                "$UCI_BIN" set "jarbis.$id.enabled=$old_enabled"
+                "$UCI_BIN" commit jarbis
+                fail 'sensor listener reload failed; change rolled back'
+            fi
+        fi
         ;;
     device-room-set)
         [ "$#" -eq 3 ] || fail 'invalid arguments'
@@ -137,10 +194,22 @@ case "$1" in
         ;;
     device-remove)
         [ "$#" -eq 2 ] || fail 'invalid arguments'
-        valid_id "$2" || fail 'invalid ID'
-        [ "$(get "jarbis.$2")" = device ] || fail 'unknown device'
-        "$UCI_BIN" delete "jarbis.$2"
+        id="$2"
+        valid_id "$id" || fail 'invalid ID'
+        [ "$(get "jarbis.$id")" = device ] || fail 'unknown device'
+        protocol="$(get "jarbis.$id.protocol")"
+        if [ "$protocol" = shelly_htg3 ]; then
+            lock_sensor_cache "$id" || fail 'sensor cache locked or unsafe'
+        fi
+        "$UCI_BIN" delete "jarbis.$id"
         "$UCI_BIN" commit jarbis
+        if [ "$protocol" = shelly_htg3 ]; then
+            # Unlink only the validated ID's regular cache paths (or symlink
+            # entries themselves). No wildcard deletion and no path traversal.
+            rm -f "$SENSOR_TMP/$id" "$SENSOR_BACKUP/$id"
+            release_sensor_cache
+            reconcile_sensor || fail 'sensor listener reload failed after removal'
+        fi
         ;;
     *) fail 'unsupported action' ;;
 esac

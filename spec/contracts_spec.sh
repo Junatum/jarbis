@@ -84,6 +84,20 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The error should be blank
   End
 
+  It '센서 등록 변경에 따른 MQTT 수신기와 캐시 생명주기를 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-shelly-lifecycle.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
+  It '0.2.3-r5 이후 업그레이드 시 재부팅 없이 설정을 보존하고 수신기를 갱신한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-upgrade.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
   It '기기 및 MQTT 인증 설정을 업그레이드 시 보존한다'
     When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-backup-restore.sh"
     The status should be success

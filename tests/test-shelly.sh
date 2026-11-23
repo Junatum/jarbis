@@ -68,7 +68,7 @@ sh "$MANAGE" device-add living 'Shelly H&T Gen3' 'shellyhtg3-aabbccddeeff' shell
 [ "$(cat "$STATE/jarbis.living.kind")" = sensor ] || fail 'sensor kind not stored'
 [ "$(cat "$STATE/jarbis.living.name")" = 'Shelly H&T Gen3' ] || fail 'Shelly name with ampersand not stored'
 [ "$(cat "$STATE/jarbis.living.protocol")" = shelly_htg3 ] || fail 'sensor protocol not stored'
-grep -Fx start "$INIT_LOG" >/dev/null || fail 'reader not started on registration'
+grep -Fx reload "$INIT_LOG" >/dev/null || fail 'reader config not reloaded on registration'
 if sh "$MANAGE" device-add same 'Duplicate' 'shellyhtg3-aabbccddeeff' shelly_htg3 >/dev/null 2>&1; then fail 'duplicate accepted'; fi
 sh "$MANAGE" device-add bulb 'Bulb' 'tasmota_CB0735' || fail 'Tasmota regression'
 [ "$(cat "$STATE/jarbis.bulb.kind")" = light ] || fail 'Tasmota light changed kind'
@@ -115,6 +115,7 @@ grep -F -- '+/events/rpc' "$TMP/sub.args" >/dev/null || fail 'default Shelly RPC
 case "$(cat "$TMP/cache/living")" in '21.1|53.1|85|'*) ;; *) fail 'listener did not dispatch real Shelly report' ;; esac
 # Removed devices must stop receiving (even while old cached data exists).
 sh "$MANAGE" device-remove living || fail 'cannot remove sensor'
+[ ! -e "$TMP/cache/living" ] && [ ! -e "$TMP/backup/living" ] || fail 'removed sensor cache remains'
 if printf '%s' '{"id":0,"tC":21}' | sh "$CACHE" ingest 'shellyhtg3-aabbccddeeff/status/temperature:0' >/dev/null 2>&1; then fail 'removed sensor still updated'; fi
 # DHCP discovery identifies only the expected awake Shelly Gen3 model + MAC.
 cat > "$TMP/bin/curl" <<'MOCK'
