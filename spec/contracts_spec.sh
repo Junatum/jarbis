@@ -91,7 +91,14 @@ Describe 'Jarbis ShellSpec 계약 테스트'
     The error should be blank
   End
 
-  It '0.2.3-r5 이후 업그레이드 시 재부팅 없이 설정을 보존하고 수신기를 갱신한다'
+  It '0.2.4 정식 버전의 읽기 전용 공유기 점검을 검증한다'
+    When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-release-check.sh"
+    The status should be success
+    The output should start with 'PASS:'
+    The error should be blank
+  End
+
+  It '0.2.3-r6에서 0.2.4-r1로 업그레이드할 때 설정과 수신기를 보존한다'
     When run command sh "$SHELLSPEC_PROJECT_ROOT/tests/test-upgrade.sh"
     The status should be success
     The output should start with 'PASS:'

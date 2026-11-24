@@ -117,5 +117,3 @@ CI에서는 `JARBIS_REQUIRE_UCODE=1`로 ucode 컴파일 및 RPC 런타임 테스
 ## 라이선스
 
 이 프로젝트는 [GPL-3.0-or-later](LICENSE) 조건으로 배포됩니다.
-
-Jarbis 0.2.3-r2부터 Shelly H&T Gen3 온습도 센서를 로컬 MQTT로 수신하고 SmartSafeHub 스마트홈 화면에서 확인할 수 있습니다. 연결 안내는 [Integration](docs/INTEGRATION.md)을 참고하세요.

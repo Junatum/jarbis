@@ -19,7 +19,7 @@ cat > "$TMP/bin/init" <<'MOCK'
 printf '%s\n' "$1" >> "$JARBIS_ACTIONS"
 if [ "$1" = reload ]; then
  [ "${JARBIS_MOCK_FAIL_RELOAD:-0}" = 0 ] || exit 1
- printf 'r6\n' > "$JARBIS_LISTENER_RELEASE"
+ printf '0.2.4-r1\n' > "$JARBIS_LISTENER_RELEASE"
 fi
 MOCK
 cat > "$TMP/rpcd-init" <<'MOCK'
@@ -71,13 +71,13 @@ chmod 600 "$TMP/etc/jarbis/device-credentials" "$TMP/etc/jarbis/mosquitto_pub" "
 export JARBIS_MOCK_ENABLED="$TMP/enabled" JARBIS_ACTIONS="$TMP/actions"
 export JARBIS_LISTENER_RELEASE="$TMP/active-release"
 printf '1\n' > "$JARBIS_MOCK_ENABLED"
-printf 'r5\n' > "$JARBIS_LISTENER_RELEASE"
+printf '0.2.3-r6\n' > "$JARBIS_LISTENER_RELEASE"
 PATH="$TMP/bin:$PATH"; export PATH
 IPKG_INSTROOT=''; export IPKG_INSTROOT
 sh "$TMP/postinst" || fail 'upgrade postinst failed'
 grep -Fxq 'reload' "$JARBIS_ACTIONS" || fail 'running instance did not reload'
 grep -Fxq 'reconcile' "$JARBIS_ACTIONS" || fail 'rpcd object not reconciled'
-[ "$(cat "$JARBIS_LISTENER_RELEASE")" = r6 ] || fail 'new listener code not applied'
+[ "$(cat "$JARBIS_LISTENER_RELEASE")" = 0.2.4-r1 ] || fail 'new listener code not applied'
 ! grep -Fxq stop "$JARBIS_ACTIONS" || fail 'unnecessary full stop during upgrade'
 (
  cd "$TMP/etc"
